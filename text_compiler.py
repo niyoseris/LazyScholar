@@ -5,6 +5,8 @@ Text Compiler Module - Compiles the final paper based on analyzed content.
 import os
 import logging
 import json
+import time
+import random
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
@@ -83,93 +85,134 @@ def generate_section_content(section_info, analyzed_content):
     Returns:
         str: Generated section content
     """
-    # Set up Gemini API
-    safety_settings = setup_gemini_api()
+    # Maximum number of retries
+    max_retries = 5
+    # Initial delay in seconds (will be increased with each retry using exponential backoff)
+    base_delay = 5
+    # Keep track of retry attempts
+    retry_count = 0
     
-    # Create a model instance
-    model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash-exp",
-        safety_settings=safety_settings,
-        generation_config={"temperature": 0.4}
-    )
-    
-    # Get section name
-    section_name = section_info.get('name', '')
-    
-    # Log what we're generating
-    logger.info(f"Generating content for section: {section_name}")
-    
-    # If we have analyzed content for this section, use it
-    if analyzed_content:
-        # Format the analyzed content for the prompt
-        formatted_content = {
-            "key_findings": analyzed_content.get("key_findings", []),
-            "methodologies": analyzed_content.get("methodologies", []),
-            "cited_authors": analyzed_content.get("cited_authors", []),
-            "research_gaps": analyzed_content.get("research_gaps", []),
-            "theoretical_frameworks": analyzed_content.get("theoretical_frameworks", []),
-            "papers_analyzed": analyzed_content.get("papers_analyzed", 0)
-        }
-        
-        # Craft the prompt
-        prompt = f"""
-        You're writing a section for an academic paper on the topic "{section_name}".
-        
-        Using the information from research analysis, write a comprehensive, 
-        well-structured section that synthesizes the findings and includes appropriate citations.
-        
-        Research Analysis:
-        {json.dumps(formatted_content, indent=2)}
-        
-        Your section should:
-        1. Begin with an introduction to the topic
-        2. Present the key findings and information from the research
-        3. Compare and contrast different viewpoints or findings when available
-        4. Discuss methodologies used in the research
-        5. Identify any research gaps
-        6. End with a conclusion or transition to the next section
-        
-        Use appropriate citations in the format (Author, Year) when referencing specific findings.
-        Write in a scholarly tone appropriate for an academic paper.
-        
-        Section length should be approximately 400-600 words.
-        """
-        
+    while retry_count <= max_retries:
         try:
-            # Generate the response
-            response = model.generate_content(prompt)
+            # Set up API
+            safety_settings = setup_gemini_api()
             
-            # Extract the response text
-            section_content = response.text
-            return section_content
+            # Convert section_info into a useful format
+            section_name = section_info.get('name', section_info.get('topic', 'Unknown'))
+            section_subtopics = section_info.get('subtopics', [])
+            
+            # Ensure analyzed_content is a dictionary, not a list
+            if isinstance(analyzed_content, list):
+                # Convert list to dictionary based on key_findings, methodologies, etc.
+                content_dict = {
+                    "key_findings": [],
+                    "methodologies": [],
+                    "theoretical_frameworks": [],
+                    "research_gaps": [],
+                    "papers": []
+                }
+                
+                # Extract data from the list items
+                for item in analyzed_content:
+                    if isinstance(item, dict):
+                        if "key_findings" in item and item["key_findings"]:
+                            content_dict["key_findings"].extend(item["key_findings"])
+                        if "methodology" in item and item["methodology"]:
+                            content_dict["methodologies"].append(item["methodology"])
+                        if "theoretical_framework" in item and item["theoretical_framework"]:
+                            content_dict["theoretical_frameworks"].append(item["theoretical_framework"])
+                        if "research_gaps" in item and item["research_gaps"]:
+                            content_dict["research_gaps"].extend(item["research_gaps"])
+                        # Add the paper itself
+                        content_dict["papers"].append(item)
+                
+                analyzed_content = content_dict
+            
+            # Create a model
+            generation_config = {
+                "temperature": 0.7,
+                "top_p": 0.8,
+                "top_k": 40,
+                "max_output_tokens": 2048,
+            }
+            
+            model = genai.GenerativeModel(
+                model_name="gemini-2.0-flash-exp",
+                generation_config=generation_config,
+                safety_settings=safety_settings
+            )
+            
+            # Prepare context for the model
+            context = {
+                "section_name": section_name,
+                "subtopics": section_subtopics,
+                "key_findings": analyzed_content.get("key_findings", []),
+                "methodologies": analyzed_content.get("methodologies", []),
+                "theoretical_frameworks": analyzed_content.get("theoretical_frameworks", []),
+                "research_gaps": analyzed_content.get("research_gaps", []),
+                "papers": analyzed_content.get("papers", [])
+            }
+            
+            # Create a prompt
+            prompt = f"""
+            You are a research assistant writing a section for an academic paper. Generate content for the following section:
+            
+            Section: {context['section_name']}
+            
+            Subtopics to cover: {', '.join(context['subtopics']) if context['subtopics'] else 'General overview'}
+            
+            Use the following research findings:
+            
+            Key Findings:
+            {chr(10).join(['- ' + finding for finding in context['key_findings']]) if context['key_findings'] else 'No specific findings available.'}
+            
+            Methodologies:
+            {chr(10).join(['- ' + methodology for methodology in context['methodologies']]) if context['methodologies'] else 'No specific methodologies available.'}
+            
+            Theoretical Frameworks:
+            {chr(10).join(['- ' + framework for framework in context['theoretical_frameworks']]) if context['theoretical_frameworks'] else 'No specific frameworks available.'}
+            
+            Research Gaps:
+            {chr(10).join(['- ' + gap for gap in context['research_gaps']]) if context['research_gaps'] else 'No specific research gaps identified.'}
+            
+            Write a comprehensive, well-structured section that incorporates these findings and addresses the subtopics.
+            Use a formal academic writing style. Do not use first person pronouns.
+            Do not include a section heading or title.
+            """
+            
+            # Generate content
+            response = model.generate_content(prompt)
+            return response.text
+            
         except Exception as e:
-            logger.error(f"Error generating content for section {section_name}: {str(e)}", exc_info=True)
-            # Return a placeholder in case of error
-            return f"This section would discuss {section_name} in detail, including relevant research findings and analysis."
+            error_message = str(e)
+            
+            # Check if it's a resource exhaustion error (HTTP 429)
+            if "429" in error_message and "Resource has been exhausted" in error_message:
+                # Calculate delay with exponential backoff and some randomness to avoid thundering herd
+                delay = (base_delay * (2 ** retry_count)) + (random.randint(1, 1000) / 1000)
+                
+                # Log the retry attempt
+                logging.warning(f"Resource exhausted error encountered for section '{section_info.get('name', 'Unknown')}'. "
+                                f"Retrying in {delay:.2f} seconds... (Attempt {retry_count+1}/{max_retries+1})")
+                
+                # Wait before retrying
+                time.sleep(delay)
+                
+                # Increment retry counter
+                retry_count += 1
+                
+                # If we've reached max retries, return the fallback content
+                if retry_count > max_retries:
+                    logging.error(f"Max retries reached for section '{section_info.get('name', 'Unknown')}'. Returning fallback content.")
+                    return f"[Content for section '{section_info.get('name', section_info.get('topic', 'Unknown'))}' could not be generated due to an error: {error_message}.]"
+            else:
+                # For other errors, don't retry - just log and return fallback content
+                logging.error(f"Error generating section content: {error_message}")
+                return f"[Content for section '{section_info.get('name', section_info.get('topic', 'Unknown'))}' could not be generated due to an error: {error_message}]"
     
-    # If we don't have specific analyzed content, generate generic content
-    else:
-        generic_prompt = f"""
-        You're writing a section for an academic paper on "{section_name}".
-        
-        Although specific research analysis isn't available for this section, 
-        write a well-structured academic section that:
-        
-        1. Introduces the concept of {section_name}
-        2. Discusses its general importance in the field
-        3. Outlines what would typically be covered in this section
-        4. Suggests areas where more research might be needed
-        
-        Write in a scholarly tone appropriate for an academic paper.
-        The section should be approximately 300-400 words.
-        """
-        
-        try:
-            generic_response = model.generate_content(generic_prompt)
-            return generic_response.text
-        except Exception as e:
-            logger.error(f"Error generating generic content for section {section_name}: {str(e)}", exc_info=True)
-            return f"This section would discuss {section_name} in detail, including its importance and research opportunities."
+    # This shouldn't be reached, but just in case
+    return f"[Content for section '{section_info.get('name', section_info.get('topic', 'Unknown'))}' could not be generated.]"
 
 def generate_title(problem_statement):
     """
@@ -756,10 +799,42 @@ def compile_paper(problem_statement, topics_subtopics, analyzed_content):
     # Add references
     final_paper += "## References\n\n"
     for reference in paper["references"]:
-        final_paper += f"- {reference}\n"
+        final_paper += f"* {reference}\n"
     
     show_status("PAPER COMPILATION COMPLETE", 
                "Final paper compiled successfully", 
                {"word_count": len(final_paper.split()), "character_count": len(final_paper)})
+    
+    # Write the paper to a file
+    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "research_results")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Create a filename from the title
+    filename = paper["title"].replace(" ", "_").replace("/", "_").replace("\\", "_")
+    filename = "".join(c for c in filename if c.isalnum() or c in "_ -")
+    filename = filename + ".md"
+    output_path = os.path.join(output_dir, filename)
+    
+    with open(output_path, "w") as f:
+        f.write(final_paper)
+        
+    # Automatically update references using reference_manager
+    try:
+        # Import the reference manager
+        from reference_manager import ReferenceManager
+        
+        # Create an instance of the reference manager
+        reference_manager = ReferenceManager()
+        
+        # Update the references in the paper
+        reference_manager.update_document_references(output_path)
+        
+        show_status("REFERENCE FORMATTING", 
+                  "Applied standard reference formatting using ReferenceManager", 
+                  {"file_path": output_path})
+    except Exception as e:
+        show_status("REFERENCE FORMATTING WARNING", 
+                  f"Could not apply reference formatting: {str(e)}", 
+                  {"error": str(e)})
     
     return final_paper

@@ -3,20 +3,22 @@ Web Scraper Module - Handles automated academic database searching using Seleniu
 """
 
 import os
-import time
-import logging
-import random
-import platform
 import sys
-from shutil import which
+import time
+import json
+import random
+import logging
+import requests
+import subprocess
+import re
+import urllib
+from urllib.parse import quote_plus, urlparse, urlencode
 from datetime import datetime
 from io import BytesIO
-import requests
 import base64
-import json
-import re
 import string
 from typing import Dict, List, Optional, Tuple, Union, Any
+from selenium.webdriver.common.keys import Keys  # Add Keys import
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
@@ -53,7 +55,6 @@ SELENIUM_AVAILABLE = False
 try:
     from selenium import webdriver
     from selenium.webdriver.common.by import By
-    from selenium.webdriver.common.keys import Keys
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.common.exceptions import (
@@ -127,6 +128,19 @@ except ImportError:
 BLOCKED_SITES = set()
 # File to persist blocked sites between runs
 BLOCKED_SITES_FILE = "blocked_sites.json"
+
+# CAPTCHA handling configuration
+CAPTCHA_DETECTION_ENABLED = True
+CAPTCHA_AUTO_SOLVE_ENABLED = False  # Disabled by default as it requires external services
+CAPTCHA_WAIT_TIME = 60  # Default: wait up to 60 seconds for manual CAPTCHA solving
+CAPTCHA_SCREENSHOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captcha_screenshots")
+
+# Create captcha_screenshots directory if it doesn't exist
+os.makedirs(CAPTCHA_SCREENSHOT_DIR, exist_ok=True)
+
+class BlockedSiteException(Exception):
+    """Exception raised when a site is blocked or blocking access."""
+    pass
 
 def load_blocked_sites():
     """Load previously blocked sites from file."""
@@ -242,13 +256,14 @@ def detect_captcha(browser):
     
     return False, None
 
-def handle_captcha(browser, url):
+def handle_captcha(browser, url, wait_time=None):
     """
     Handle captcha challenges on the current page.
     
     Args:
         browser: Selenium WebDriver instance
         url: Current URL being accessed
+        wait_time: Optional override for CAPTCHA_WAIT_TIME (in seconds)
         
     Returns:
         bool: True if captcha was handled successfully, False otherwise
@@ -263,13 +278,17 @@ def handle_captcha(browser, url):
         
     logger.warning(f"Captcha detected on {url} (Type: {captcha_type})")
     
+    # Create a unique filename for the screenshot
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    screenshot_path = os.path.join(CAPTCHA_SCREENSHOT_DIR, f"captcha_{timestamp}.png")
+    
     # Take a screenshot to show the captcha
-    screenshot_path = f"/tmp/captcha_{int(time.time())}.png"
     try:
         browser.save_screenshot(screenshot_path)
         logger.info(f"Captcha screenshot saved to {screenshot_path}")
     except Exception as e:
         logger.warning(f"Error saving captcha screenshot: {e}")
+        screenshot_path = None
     
     if CAPTCHA_AUTO_SOLVE_ENABLED:
         # Here you would integrate with a captcha solving service
@@ -285,344 +304,234 @@ def handle_captcha(browser, url):
         """
         pass
     
-    # Alert the user to manually solve the captcha
-    logger.info(f"Waiting {CAPTCHA_WAIT_TIME} seconds for manual captcha solving...")
-    
-    # Display a message in the browser if possible
+    # Display a notification in the browser
     try:
         browser.execute_script("""
             const div = document.createElement('div');
+            div.id = 'captcha_notification';
             div.style.position = 'fixed';
             div.style.top = '0';
             div.style.left = '0';
             div.style.width = '100%';
-            div.style.backgroundColor = 'yellow';
-            div.style.color = 'black';
-            div.style.padding = '10px';
+            div.style.backgroundColor = '#ffeb3b';
+            div.style.color = '#000';
+            div.style.padding = '15px';
             div.style.zIndex = '9999';
             div.style.textAlign = 'center';
             div.style.fontWeight = 'bold';
-            div.textContent = 'PLEASE SOLVE THE CAPTCHA MANUALLY - System will continue in a moment';
-            document.body.appendChild(div);
+            div.style.fontSize = '18px';
+            div.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
+            div.innerHTML = '<span style="color: red; font-size: 20px;">⚠️ CAPTCHA DETECTED ⚠️</span><br>' + 
+                            'Please solve the CAPTCHA manually to continue.<br>' + 
+                            'The system will automatically proceed once the CAPTCHA is solved.';
+            
+            // Check if notification already exists
+            if (!document.getElementById('captcha_notification')) {
+                document.body.appendChild(div);
+            }
         """)
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Error displaying captcha notification: {e}")
     
-    # Wait for manual solving
-    solving_time = CAPTCHA_WAIT_TIME
-    interval = 5
-    for _ in range(solving_time // interval):
+    # Show terminal message for user
+    captcha_info = f"""
+{'='*80}
+CAPTCHA DETECTED - USER ACTION REQUIRED
+{'='*80}
+A CAPTCHA has been detected on the page at: {url}
+Type: {captcha_type}
+
+Please switch to the browser window and solve the CAPTCHA manually.
+The research process will automatically continue once the CAPTCHA is solved.
+
+Screenshot saved to: {screenshot_path if screenshot_path else "Error saving screenshot"}
+{'='*80}
+"""
+    print(captcha_info)
+    
+    # If system has 'say' command (macOS), use it to alert user with voice
+    if platform.system() == 'Darwin':
+        try:
+            os.system('say "CAPTCHA detected. Please solve it to continue."')
+        except:
+            pass
+    
+    # Wait for manual solving - use provided wait_time if available
+    solving_time = wait_time if wait_time is not None else CAPTCHA_WAIT_TIME
+    interval = 3  # Check every 3 seconds for better responsiveness
+    
+    logger.info(f"Waiting up to {solving_time} seconds for manual captcha solving...")
+    
+    for i in range(solving_time // interval):
         time.sleep(interval)
         
         # Check if we're still on a captcha page
         still_captcha, _ = detect_captcha(browser)
         if not still_captcha:
+            # Remove the notification banner if captcha is solved
+            try:
+                browser.execute_script("""
+                    const notification = document.getElementById('captcha_notification');
+                    if (notification) {
+                        notification.remove();
+                    }
+                """)
+            except:
+                pass
+                
+            print(f"\n{'='*80}\nCAPTCHA SOLVED SUCCESSFULLY! Continuing research process...\n{'='*80}")
+            if platform.system() == 'Darwin':
+                try:
+                    os.system('say "CAPTCHA solved. Continuing research."')
+                except:
+                    pass
+                    
             logger.info("Captcha appears to be solved")
             return True
+        
+        # Print a progress indicator every few seconds
+        if i % 5 == 0:
+            remaining = solving_time - (i * interval)
+            print(f"Waiting for CAPTCHA solution... {remaining} seconds remaining")
     
     # If we reach here, the captcha wasn't solved
+    print(f"\n{'='*80}\nCAPTCHA NOT SOLVED within the {solving_time} second time limit.\nResearch process will try to continue, but may fail.\n{'='*80}")
     logger.warning("Captcha not solved within the waiting period")
     return False
 
-def check_for_site_blocking(browser, url):
-    """
-    Check if the site is blocking our scraping attempts.
+def setup_browser(headless=True, browser_type=None):
+    """Set up a Selenium browser for web scraping.
     
     Args:
-        browser: Selenium WebDriver instance
-        url: URL that was accessed
-        
+        headless (bool): Whether to run the browser in headless mode
+        browser_type (str): Type of browser to configure ('chrome', 'firefox', 'duckduckgo', etc.)
+    
     Returns:
-        bool: True if site appears to be blocking access, False otherwise
+        browser: Selenium WebDriver instance or MockBrowser if Selenium is not available
+        
+    Note:
+        Can be used as a context manager with 'with' statement:
+        with setup_browser(headless=True, browser_type='duckduckgo') as browser:
+            # Use browser here
     """
-    # Get the page source
-    page_source = browser.page_source.lower()
     
-    # Common blocking indicators
-    blocking_indicators = [
-        "access denied",
-        "blocked",
-        "captcha",
-        "automated access",
-        "detected unusual traffic",
-        "bot detected",
-        "security check",
-        "please verify you are a human",
-        "too many requests",
-        "rate limit exceeded",
-        "429 too many requests",
-        "403 forbidden"
-    ]
+    # Create the browser instance
+    browser = _create_browser(headless, browser_type)
     
-    for indicator in blocking_indicators:
-        if indicator in page_source:
-            logger.warning(f"Possible site blocking detected: '{indicator}' found on {url}")
-            blocked_domain = add_to_blocked_sites(url)
-            return True
+    # Define a context manager class that allows this function to be used with 'with'
+    class BrowserContextManager:
+        def __init__(self, browser_instance):
+            self.browser = browser_instance
+            
+        def __enter__(self):
+            return self.browser
+            
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if self.browser and not isinstance(self.browser, MockBrowser):
+                try:
+                    self.browser.quit()
+                except Exception as e:
+                    logger.warning(f"Error closing browser: {e}")
     
-    # Check for very short responses which might indicate blocking
-    if len(page_source) < 500 and "error" in page_source:
-        logger.warning(f"Possible site blocking detected: short error response from {url}")
-        blocked_domain = add_to_blocked_sites(url)
-        return True
-        
-    # Check current URL - if redirected to a completely different domain, might be blocking
-    current_url = browser.current_url
-    from urllib.parse import urlparse
-    original_domain = urlparse(url).netloc
-    current_domain = urlparse(current_url).netloc
+    # Add a context manager as an attribute to the browser
+    browser._context_manager = BrowserContextManager(browser)
+    browser.__enter__ = browser._context_manager.__enter__
+    browser.__exit__ = browser._context_manager.__exit__
     
-    if original_domain != current_domain and "block" in current_url.lower():
-        logger.warning(f"Possible site blocking detected: redirected from {original_domain} to {current_domain}")
-        blocked_domain = add_to_blocked_sites(url)
-        return True
-        
-    return False
+    # Return the browser with context manager capabilities
+    return browser
 
-def handle_cookie_consent(browser):
-    """
-    Attempt to handle cookie consent popups.
+def _create_browser(headless=True, browser_type=None):
+    """Internal function to create a browser instance"""
+    # Check if Selenium is available
+    if not SELENIUM_AVAILABLE:
+        logger.warning("Selenium not available, using mock browser for development")
+        return MockBrowser()
     
-    Args:
-        browser: Selenium WebDriver instance
-        
-    Returns:
-        bool: True if a consent dialog was handled, False otherwise
-    """
-    try:
-        # Common selectors for cookie consent buttons
-        consent_button_selectors = [
-            "button[id*='accept' i]",
-            "button[class*='accept' i]",
-            "button[id*='agree' i]",
-            "button[class*='agree' i]",
-            "button[id*='consent' i]",
-            "button[class*='consent' i]",
-            "a[id*='accept' i]",
-            "a[class*='accept' i]",
-            "div[id*='accept' i]",
-            "div[class*='accept' i]",
-            "input[id*='accept' i]",
-            "#accept-cookies",
-            "#acceptCookies",
-            ".accept-cookies",
-            ".acceptCookies",
-            "[aria-label*='accept cookies' i]",
-            "[aria-label*='accept all' i]",
-            "[data-cookieconsent='accept']"
-        ]
-        
-        for selector in consent_button_selectors:
-            try:
-                elements = browser.find_elements(By.CSS_SELECTOR, selector)
-                for element in elements:
-                    if element.is_displayed() and ("accept" in element.text.lower() or 
-                                                  "agree" in element.text.lower() or 
-                                                  "consent" in element.text.lower() or
-                                                  "allow" in element.text.lower()):
-                        logger.info(f"Clicking cookie consent button: {element.text}")
-                        element.click()
-                        time.sleep(1)  # Wait for modal to close
-                        return True
-            except Exception as e:
-                # Continue trying other selectors if one fails
-                continue
-        
-        # Try JavaScript approach if direct methods fail
+    # Define common user agents
+    user_agents = {
+        'chrome': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'firefox': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+        'safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15',
+        'duckduckgo': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36 DuckDuckGo/110',
+    }
+    
+    # Get DuckDuckGo specific user agent if requested
+    if browser_type == 'duckduckgo':
+        logger.info("Setting up browser with DuckDuckGo configuration")
+        user_agent = user_agents.get('duckduckgo')
+    else:
+        # Get default user agent based on browser type
+        user_agent = user_agents.get(browser_type, user_agents['chrome'])
+    
+    # Try to set up Chrome/Chromium browser
+    if CHROME_AVAILABLE:
         try:
-            # Common cookie consent handling script
-            js_result = browser.execute_script("""
-                // Try to find and click accept buttons
-                let buttons = document.querySelectorAll('button, a, div.button, input[type="button"]');
-                for (let button of buttons) {
-                    let text = button.textContent.toLowerCase();
-                    if ((text.includes('accept') || text.includes('agree') || 
-                         text.includes('consent') || text.includes('allow') || 
-                         text.includes('cookie')) && 
-                        !text.includes('manage') && !text.includes('reject') && 
-                        button.offsetParent !== null) {
-                        console.log('Clicking consent button via JS: ' + text);
-                        button.click();
-                        return true;
-                    }
-                }
-                
-                // Try to find and close cookie banners directly
-                let banners = document.querySelectorAll('[class*="cookie" i], [id*="cookie" i], [class*="consent" i], [id*="consent" i]');
-                for (let banner of banners) {
-                    if (banner.offsetParent !== null) {
-                        banner.style.display = 'none';
-                        return true;
-                    }
-                }
-                
-                return false;
-            """)
+            options = ChromeOptions()
+            if headless:
+                options.add_argument('--headless')
             
-            if js_result:
-                logger.info("Handled cookie consent via JavaScript")
-                return True
-                
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument(f'user-agent={user_agent}')
+            
+            # Add DuckDuckGo specific options
+            if browser_type == 'duckduckgo':
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                options.add_experimental_option('excludeSwitches', ['enable-automation'])
+                options.add_experimental_option('useAutomationExtension', False)
+            
+            if WEBDRIVER_MANAGER_AVAILABLE:
+                service = ChromeService(executable_path=ChromeDriverManager().install())
+                browser = webdriver.Chrome(service=service, options=options)
+            else:
+                # Try with the default Chrome driver location
+                browser = webdriver.Chrome(options=options)
+            
+            # Additional setup for DuckDuckGo emulation
+            if browser_type == 'duckduckgo':
+                browser.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
+                browser.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
+            return browser
         except Exception as e:
-            logger.warning(f"Error in JavaScript cookie consent handling: {e}")
-        
-        return False
-        
-    except Exception as e:
-        logger.warning(f"Error handling cookie consent: {e}")
-        return False
-
-def setup_browser(headless=True):
-    """
-    Set up and return a Selenium browser instance.
-    Falls back to MockBrowser if Selenium browsers cannot be set up.
+            logger.warning(f"Chrome browser setup failed: {e}")
     
-    Args:
-        headless (bool): Whether to run the browser in headless mode (no UI)
-        
-    Returns:
-        WebDriver or MockBrowser: Browser instance
-    """
-    # Create a simple timeout mechanism
-    import threading
-    import time
-    
-    # Flag to indicate if we've completed browser setup
-    setup_completed = threading.Event()
-    browser_result = [None]
-    
-    def setup_with_timeout():
+    # Try to set up Firefox browser
+    if FIREFOX_AVAILABLE:
         try:
-            # If Selenium is not available, return a mock browser immediately
-            if not SELENIUM_AVAILABLE:
-                logger.warning("Selenium not available. Using mock browser.")
-                browser_result[0] = MockBrowser(visible=not headless)
-                setup_completed.set()
-                return
+            options = FirefoxOptions()
+            if headless:
+                options.add_argument('--headless')
             
-            # Check for Chrome/Chromium first (most widely used)
-            if CHROME_AVAILABLE:
-                try:
-                    logger.info(f"Attempting to set up Chrome/Chromium browser (headless: {headless})")
-                    options = ChromeOptions()
-                    
-                    # Common Chrome options
-                    options.add_argument("--disable-extensions")
-                    options.add_argument("--disable-gpu")
-                    options.add_argument("--no-sandbox")
-                    options.add_argument("--disable-dev-shm-usage")
-                    options.add_argument("--disable-notifications")
-                    
-                    if headless:
-                        options.add_argument("--headless=new")
-                    
-                    # Try to detect Chrome/Chromium location based on platform
-                    chrome_path = None
-                    if platform.system() == "Darwin":  # macOS
-                        # Check for Chrome
-                        possible_paths = [
-                            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                            "/Applications/Chromium.app/Contents/MacOS/Chromium"
-                        ]
-                        for path in possible_paths:
-                            if os.path.exists(path):
-                                chrome_path = path
-                                break
-                        
-                        if chrome_path:
-                            options.binary_location = chrome_path
-                    
-                    # Set up the Chrome service
-                    service = None
-                    if WEBDRIVER_MANAGER_AVAILABLE:
-                        try:
-                            driver_path = ChromeDriverManager().install()
-                            service = ChromeService(driver_path)
-                        except Exception as e:
-                            logger.warning(f"Failed to use ChromeDriverManager: {e}")
-                            service = ChromeService()
-                    else:
-                        service = ChromeService()
-                    
-                    # Try to create the browser
-                    browser = webdriver.Chrome(service=service, options=options)
-                    logger.info("Successfully set up Chrome/Chromium browser")
-                    browser_result[0] = browser
-                    setup_completed.set()
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to set up Chrome/Chromium browser: {e}")
-                    # Fall through to next browser
-            else:
-                logger.warning("Chrome/Chromium components not available")
+            options.set_preference('general.useragent.override', user_agent)
             
-            # Try Firefox next
-            if FIREFOX_AVAILABLE:
-                try:
-                    logger.info(f"Attempting to set up Firefox browser (headless: {headless})")
-                    
-                    # Try to install geckodriver if the auto-installer is available
-                    if GECKO_AUTOINSTALLER_AVAILABLE:
-                        try:
-                            geckodriver_autoinstaller.install()
-                        except Exception as e:
-                            logger.warning(f"Failed to install geckodriver: {e}")
-                    
-                    options = FirefoxOptions()
-                    if headless:
-                        options.add_argument("--headless")
-                    
-                    browser = webdriver.Firefox(options=options)
-                    logger.info("Successfully set up Firefox browser")
-                    browser_result[0] = browser
-                    setup_completed.set()
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to set up Firefox browser: {e}")
-                    # Fall through to next browser
-            else:
-                logger.warning("Firefox components not available")
+            # Install geckodriver if needed and available
+            if GECKO_AUTOINSTALLER_AVAILABLE:
+                geckodriver_autoinstaller.install()
             
-            # Try Safari as a last resort (macOS only)
-            if SAFARI_AVAILABLE and platform.system() == "Darwin":
-                try:
-                    logger.info(f"Attempting to set up Safari browser (headless mode not supported)")
-                    # Note: Safari doesn't support headless mode
-                    browser = webdriver.Safari()
-                    logger.info("Successfully set up Safari browser")
-                    browser_result[0] = browser
-                    setup_completed.set()
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to set up Safari browser: {e}")
-                    # Fall through to mock browser
-            else:
-                if platform.system() == "Darwin":
-                    logger.warning("Safari components not available")
+            browser = webdriver.Firefox(options=options)
             
-            # If all browsers failed, use mock browser
-            logger.warning("All browser setup attempts failed. Using mock browser.")
-            browser_result[0] = MockBrowser(visible=not headless)
-            setup_completed.set()
+            # Additional setup for DuckDuckGo emulation for Firefox
+            if browser_type == 'duckduckgo':
+                browser.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
+            return browser
         except Exception as e:
-            # Catch-all to ensure we always return something
-            logger.error(f"Unexpected error in browser setup: {e}")
-            browser_result[0] = MockBrowser(visible=not headless)
-            setup_completed.set()
+            logger.warning(f"Firefox browser setup failed: {e}")
     
-    # Start browser setup in a separate thread
-    setup_thread = threading.Thread(target=setup_with_timeout)
-    setup_thread.daemon = True
-    setup_thread.start()
+    # Try to set up Safari browser on macOS
+    if SAFARI_AVAILABLE and platform.system() == "Darwin":
+        try:
+            browser = webdriver.Safari()
+            return browser
+        except Exception as e:
+            logger.warning(f"Safari browser setup failed: {e}")
     
-    # Wait for 15 seconds maximum for browser setup
-    if not setup_completed.wait(15):  # Timeout after 15 seconds
-        logger.warning("Browser setup timed out after 15 seconds. Using mock browser.")
-        return MockBrowser(visible=not headless)
-    
-    # Return the browser that was set up
-    return browser_result[0]
+    logger.error("All browser setup attempts failed, using mock browser")
+    return MockBrowser()
 
 class MockBrowser:
     """A mock browser class for testing."""
@@ -1159,7 +1068,7 @@ def analyze_page_with_vision(image, goal):
             "visible_results": []
         }
 
-def search_with_vision_assistance(browser, url, search_term, database_name):
+def search_with_vision_assistance(browser, url, search_term, database_name, settings=None):
     """
     Search a database using vision model assistance to find UI elements.
     
@@ -1168,7 +1077,8 @@ def search_with_vision_assistance(browser, url, search_term, database_name):
         url: URL of the database to search
         search_term: Term to search for
         database_name: Name of the database (for logging)
-    
+        settings: Optional dictionary of settings (e.g., 'captcha_wait_time')
+        
     Returns:
         tuple: (search_success, screenshot_of_results)
             - search_success: Boolean indicating if the search was completed
@@ -1207,7 +1117,7 @@ def search_with_vision_assistance(browser, url, search_term, database_name):
         # Check for captchas and attempt to handle them
         if detect_captcha(browser)[0]:
             logger.info("Detected captcha during initial page load")
-            if not handle_captcha(browser, url):
+            if not handle_captcha(browser, url, wait_time=settings.get('captcha_wait_time') if settings else None):
                 logger.warning("Failed to handle captcha, continuing anyway")
         
         # Check if the site is blocking our access
@@ -1337,13 +1247,14 @@ def search_with_vision_assistance(browser, url, search_term, database_name):
         logger.error(f"Error during vision-assisted search: {str(e)}", exc_info=True)
         return False, None
 
-def search_google_scholar(browser, search_term):
+def search_google_scholar(browser, search_term, settings=None):
     """
     Search Google Scholar using Selenium.
     
     Args:
         browser: Selenium WebDriver instance
         search_term: Term to search for (string or dict)
+        settings: Optional dictionary of settings (e.g., 'captcha_wait_time')
     
     Returns:
         list: List of search results
@@ -1359,8 +1270,8 @@ def search_google_scholar(browser, search_term):
     
     # Check if site is blocked
     if is_site_blocked(url):
-        logger.warning(f"Skipping Google Scholar as it's in the blocked sites list")
-        return generate_mock_results(search_term, 5)
+        logger.warning(f"Google Scholar is in the blocked sites list. Attempting to access anyway.")
+        # Instead of generating mock results, we'll try to access it anyway
     
     try:
         # Navigate to Google Scholar
@@ -1370,10 +1281,16 @@ def search_google_scholar(browser, search_term):
         # Wait for the page to load
         time.sleep(3)
         
-        # Check if site is blocking our access
+        # Check for captchas and attempt to handle them
+        if detect_captcha(browser)[0]:
+            logger.info("Detected captcha during initial page load")
+            if not handle_captcha(browser, url, wait_time=settings.get('captcha_wait_time') if settings else None):
+                logger.warning("Failed to handle captcha, continuing anyway")
+        
+        # Check for site blocking (not CAPTCHA)
         if check_for_site_blocking(browser, url):
             logger.warning("Google Scholar appears to be blocking access")
-            return generate_mock_results(search_term, 5)
+            return []  # Return empty results instead of mock results
         
         # Handle cookie consent if present
         if handle_cookie_consent(browser):
@@ -1382,7 +1299,7 @@ def search_google_scholar(browser, search_term):
         
         # Use vision-assisted search
         search_success, results_screenshot = search_with_vision_assistance(
-            browser, url, search_term, "Google Scholar"
+            browser, url, search_term, "Google Scholar", settings=settings
         )
         
         # If search was successful and we have results screenshot
@@ -1412,7 +1329,7 @@ def search_google_scholar(browser, search_term):
                 logger.info(f"Screenshot captured for results")
         
         # If vision model didn't find results or search failed, try traditional methods
-        if not search_success:
+        if not search_success or not results:
             # Try traditional methods to search
             try:
                 # Try different selectors for the search box
@@ -1435,16 +1352,29 @@ def search_google_scholar(browser, search_term):
                 
                 if not search_box:
                     logger.warning("Could not find search box on Google Scholar")
-                    return generate_mock_results(search_term, 5)
+                    return []  # Return empty results instead of mock results
                 
                 # Clear any existing text and enter search term
                 search_box.clear()
                 search_box.send_keys(search_term)
                 search_box.send_keys(Keys.RETURN)
                 time.sleep(3)  # Wait for results to load
+                
+                # Check if CAPTCHA appeared after search
+                captcha_detected, captcha_type = detect_captcha(browser)
+                if captcha_detected:
+                    logger.warning(f"CAPTCHA detected after search on Google Scholar ({captcha_type})")
+                    # Handle the CAPTCHA and wait for user to solve it
+                    captcha_solved = handle_captcha(browser, url, wait_time=settings.get('captcha_wait_time') if settings else None)
+                    if not captcha_solved:
+                        logger.error("CAPTCHA not solved within the time limit. Cannot proceed with Google Scholar search.")
+                        return []  # Return empty results instead of mock results
+                    
+                    # If CAPTCHA was solved, wait for the results to load
+                    time.sleep(3)
             except Exception as e:
                 logger.warning(f"Error interacting with Google Scholar search: {e}")
-                return generate_mock_results(search_term, 5)
+                return []  # Return empty results instead of mock results
         
         # Try traditional methods to extract results
         try:
@@ -1468,7 +1398,7 @@ def search_google_scholar(browser, search_term):
             
             if not result_elements:
                 logger.warning("No result elements found on Google Scholar")
-                return generate_mock_results(search_term, 5)
+                return []  # Return empty results instead of mock results
             
             for i, element in enumerate(result_elements[:5]):  # Limit to first 5 results
                 try:
@@ -1520,7 +1450,7 @@ def search_google_scholar(browser, search_term):
                     logger.warning(f"Error extracting result {i}: {e}")
         except Exception as e:
             logger.warning(f"Error extracting Google Scholar results: {e}")
-            return generate_mock_results(search_term, 5)
+            return []  # Return empty results instead of mock results
         
         # Look for PDF links in the results page and process them
         try:
@@ -1587,22 +1517,19 @@ def search_google_scholar(browser, search_term):
         
     except Exception as e:
         logger.warning(f"Error searching Google Scholar: {e}")
-        return generate_mock_results(search_term, 5)
+        return []  # Return empty results instead of mock results
     
-    # If no results found, generate mock results
-    if not results:
-        logger.info("No results found, generating mock Google Scholar results")
-        results = generate_mock_results(search_term, 5)
-    
+    # Return whatever real results we found, even if empty
     return results
 
-def search_research_gate(browser, search_term):
+def search_research_gate(browser, search_term, settings=None):
     """
     Search ResearchGate using Selenium.
     
     Args:
         browser: Selenium WebDriver instance
         search_term: Term to search for (string or dict)
+        settings: Optional dictionary of settings (e.g., 'captcha_wait_time')
     
     Returns:
         list: List of search results
@@ -1619,14 +1546,14 @@ def search_research_gate(browser, search_term):
     # Check if site is blocked
     if is_site_blocked(url):
         logger.warning(f"Skipping ResearchGate as it's in the blocked sites list")
-        return generate_mock_results(search_term, 5, "ResearchGate")
+        return []  # Return empty results instead of mock results
     
     try:
         logger.info(f"Searching ResearchGate for: '{search_term}'")
         
         # Use vision-assisted search
         search_success, results_screenshot = search_with_vision_assistance(
-            browser, url, search_term, "ResearchGate"
+            browser, url, search_term, "ResearchGate", settings=settings
         )
         
         # If search was successful and we have results screenshot
@@ -1678,16 +1605,29 @@ def search_research_gate(browser, search_term):
                 
                 if not search_box:
                     logger.warning("Could not find search box on ResearchGate")
-                    return generate_mock_results(search_term, count=5)
+                    return []  # Return empty results instead of mock results
                 
                 # Clear any existing text and enter search term
                 search_box.clear()
                 search_box.send_keys(search_term)
                 search_box.send_keys(Keys.RETURN)
                 time.sleep(3)  # Wait for results to load
+                
+                # Check if CAPTCHA appeared after search
+                captcha_detected, captcha_type = detect_captcha(browser)
+                if captcha_detected:
+                    logger.warning(f"CAPTCHA detected after search on ResearchGate ({captcha_type})")
+                    # Handle the CAPTCHA and wait for user to solve it
+                    captcha_solved = handle_captcha(browser, url, wait_time=settings.get('captcha_wait_time') if settings else None)
+                    if not captcha_solved:
+                        logger.error("CAPTCHA not solved within the time limit. Cannot proceed with ResearchGate search.")
+                        return []  # Return empty results instead of mock results
+                    
+                    # If CAPTCHA was solved, wait for the results to load
+                    time.sleep(3)
             except Exception as e:
                 logger.warning(f"Error interacting with ResearchGate search: {e}")
-                return generate_mock_results(search_term, count=5)
+                return []  # Return empty results instead of mock results
         
         # Try traditional methods to extract results
         try:
@@ -1711,38 +1651,36 @@ def search_research_gate(browser, search_term):
             
             if not result_elements:
                 logger.warning("Could not find search results on ResearchGate")
-                return generate_mock_results(search_term, count=5)
+                return []  # Return empty results instead of mock results
             
             # Extract information from result elements
             for i, element in enumerate(result_elements[:10]):  # Limit to first 10 results
                 try:
-                    title_element = element.find_element(By.CSS_SELECTOR, "a.nova-legacy-e-link, h3 a, .research-detail-title")
-                    title = title_element.text.strip()
-                    url = title_element.get_attribute('href')
+                    title_elem = element.find_element(By.CSS_SELECTOR, "a.nova-legacy-e-link, h3 a, .research-detail-title")
+                    title = title_elem.text.strip()
                     
                     # Try to extract author information
                     authors = "Unknown"
                     try:
-                        authors_element = element.find_element(By.CSS_SELECTOR, ".nova-legacy-v-person-list, .authors, .research-detail-authors")
-                        authors = authors_element.text.strip()
+                        authors_elem = element.find_element(By.CSS_SELECTOR, ".nova-legacy-v-person-list, .authors, .research-detail-authors")
+                        authors = authors_elem.text.strip()
                     except:
                         pass
                     
                     # Try to extract year information
                     year = "Unknown"
                     try:
-                        year_element = element.find_element(By.CSS_SELECTOR, ".nova-legacy-e-text--size-m, .publication-date, .research-detail-date")
-                        year_match = re.search(r'\b(19|20)\d{2}\b', year_element.text)
-                        if year_match:
-                            year = year_match.group(0)
+                        year_elem = element.find_element(By.CSS_SELECTOR, ".nova-legacy-e-text--size-m, .publication-date, .research-detail-date")
+                        year_match = re.search(r'\b(19|20)\d{2}\b', year_elem.text)
+                        year = year_match.group(1) if year_match else "Unknown"
                     except:
                         pass
                     
                     # Try to extract snippet/description
                     snippet = "No description available"
                     try:
-                        snippet_element = element.find_element(By.CSS_SELECTOR, ".nova-legacy-e-text--size-m, .abstract, .research-detail-description")
-                        snippet = snippet_element.text.strip()
+                        snippet_elem = element.find_element(By.CSS_SELECTOR, ".nova-legacy-e-text--size-m, .abstract, .research-detail-description")
+                        snippet = snippet_elem.text.strip()
                     except:
                         pass
                     
@@ -1754,6 +1692,7 @@ def search_research_gate(browser, search_term):
                         'year': year,
                         'authors': authors
                     }
+                    
                     results.append(result)
                     
                     logger.info(f"Found ResearchGate result: {title}")
@@ -1763,13 +1702,13 @@ def search_research_gate(browser, search_term):
             return results
         except Exception as e:
             logger.warning(f"Error extracting ResearchGate results: {str(e)}")
-            return generate_mock_results(search_term, count=5)
+            return []  # Return empty results instead of mock results
         
     except Exception as e:
         logger.warning(f"Error searching ResearchGate: {str(e)}")
-        return generate_mock_results(search_term, count=5)
+        return []  # Return empty results instead of mock results
 
-def search_academic_database(browser, database_url, search_terms):
+def search_academic_database(browser, database_url, search_terms, settings=None):
     """
     Search an academic database for the given search terms.
     
@@ -1777,7 +1716,8 @@ def search_academic_database(browser, database_url, search_terms):
         browser: Selenium WebDriver instance
         database_url: URL of the academic database
         search_terms: List of search terms
-        
+        settings: Optional dictionary of settings (e.g., 'captcha_wait_time')
+    
     Returns:
         dict: Dictionary mapping search terms to search results
     """
@@ -1799,9 +1739,17 @@ def search_academic_database(browser, database_url, search_terms):
             
             # Perform search for current term
             if "scholar.google.com" in database_url:
-                paper_results = search_google_scholar(browser, search_term)
+                paper_results = search_google_scholar(browser, search_term, settings=settings)
             elif "researchgate.net" in database_url:
-                paper_results = search_research_gate(browser, search_term)
+                paper_results = search_research_gate(browser, search_term, settings=settings)
+            elif "pubmed.ncbi.nlm.nih.gov" in database_url:
+                paper_results = search_pubmed(browser, search_term, settings=settings)
+            elif "ieeexplore.ieee.org" in database_url:
+                paper_results = search_ieee(browser, search_term, settings=settings)
+            elif "arxiv.org" in database_url:
+                paper_results = search_arxiv(browser, search_term, settings=settings)
+            elif "semanticscholar.org" in database_url:
+                paper_results = search_semantic_scholar(browser, search_term, settings=settings)
             else:
                 logger.warning(f"Unsupported database: {database_url}")
                 continue
@@ -1872,9 +1820,10 @@ def search_academic_databases(topics_subtopics=None, settings=None, browsers=Non
     
     # Set up browsers if not provided
     if not browsers:
-        for i in range(2):  # Set up 2 browsers
+        browser_type = settings.get('browser_type', None)
+        for i in range(settings.get('browser_count', 1)):
             try:
-                browser = setup_browser(headless=headless)
+                browser = _create_browser(headless=headless, browser_type=browser_type)
                 browsers.append(browser)
             except Exception as e:
                 logger.error(f"Error setting up browser {i}: {e}")
@@ -1898,10 +1847,10 @@ def search_academic_databases(topics_subtopics=None, settings=None, browsers=Non
         logger.info(f"Searching for topic: {topic}")
         
         # Google Scholar search
-        google_scholar_results = search_google_scholar(google_scholar_browser, topic)
+        google_scholar_results = search_google_scholar(google_scholar_browser, topic, settings=settings)
         
         # ResearchGate search
-        research_gate_results = search_research_gate(research_gate_browser, topic)
+        research_gate_results = search_research_gate(research_gate_browser, topic, settings=settings)
         
         # Combine results
         topic_results = google_scholar_results + research_gate_results
@@ -1921,10 +1870,10 @@ def search_academic_databases(topics_subtopics=None, settings=None, browsers=Non
                 logger.info(f"Searching for subtopic: {subtopic}")
                 
                 # Google Scholar search for subtopic
-                subtopic_google_results = search_google_scholar(google_scholar_browser, f"{topic} {subtopic}")
+                subtopic_google_results = search_google_scholar(google_scholar_browser, f"{topic} {subtopic}", settings=settings)
                 
                 # ResearchGate search for subtopic
-                subtopic_research_results = search_research_gate(research_gate_browser, f"{topic} {subtopic}")
+                subtopic_research_results = search_research_gate(research_gate_browser, f"{topic} {subtopic}", settings=settings)
                 
                 # Combine results
                 subtopic_results = subtopic_google_results + subtopic_research_results
@@ -1995,16 +1944,16 @@ def generate_mock_results(search_term, count=3, source=None):
     
     # Journals for publication info
     journals = [
-        "Nature",
-        "Science",
+        "Journal of Computer Science",
+        "IEEE Transactions on Pattern Analysis",
+        "Nature Digital Intelligence",
         "Proceedings of the National Academy of Sciences",
-        "Journal of the American Statistical Association",
-        "IEEE Transactions on Pattern Analysis and Machine Intelligence",
-        "Journal of Machine Learning Research",
+        "Journal of Artificial Intelligence Research",
         "ACM Computing Surveys",
-        "Artificial Intelligence",
-        "International Journal of Computer Vision",
-        "Communications of the ACM"
+        "Science Advances",
+        "Communications of the ACM",
+        "International Journal of Machine Learning",
+        "Computational Intelligence and Neuroscience"
     ]
     
     # Years for publication dates
@@ -2111,7 +2060,7 @@ def test_vision_assisted_search():
     browser = None
     try:
         # Initialize browser
-        browser = setup_browser(headless=settings['headless'])
+        browser = _create_browser(headless=settings['headless'])
         
         # Test direct vision-assisted search first
         print(f"\n===== Testing Direct Vision-Assisted Search =====")
@@ -2228,6 +2177,28 @@ if __name__ == "__main__":
 
 # Load blocked sites when module is imported
 load_blocked_sites()
+
+def get_search_engine_function(engine_name):
+    """
+    Get the appropriate search function based on the engine name.
+    
+    Args:
+        engine_name (str): Name of the search engine
+        
+    Returns:
+        function: The search function for the specified engine, or None if not found
+    """
+    engine_map = {
+        "Google Scholar": search_google_scholar,
+        "ResearchGate": search_research_gate,
+        "PubMed": search_pubmed,
+        "IEEE Xplore": search_ieee,
+        "arXiv": search_arxiv,
+        "Semantic Scholar": search_semantic_scholar,
+        "DuckDuckGo": search_duckduckgo
+    }
+    
+    return engine_map.get(engine_name)
 
 def check_for_pdf_links(browser):
     """
@@ -2384,3 +2355,1320 @@ def extract_text_from_pdf(pdf_content):
     except Exception as e:
         logger.error(f"Error extracting text from PDF: {e}")
         return f"Error extracting text: {str(e)}"
+
+def search_pubmed(browser, search_term, settings=None):
+    """
+    Search PubMed using Selenium.
+    
+    Args:
+        browser: Selenium WebDriver instance
+        search_term: Term to search for (string or dict)
+        settings: Optional dictionary of settings (e.g., 'captcha_wait_time')
+    
+    Returns:
+        list: List of search results
+    """
+    if isinstance(search_term, dict):
+        search_term = search_term.get('search_term', '')
+    
+    results = []
+    
+    try:
+        url = "https://pubmed.ncbi.nlm.nih.gov/"
+        logger.info(f"Searching PubMed for: {search_term}")
+        
+        # Navigate to PubMed
+        browser.get(url)
+        time.sleep(3)
+        
+        # Check for captchas and attempt to handle them
+        if detect_captcha(browser)[0]:
+            logger.info("Detected captcha on PubMed")
+            if not handle_captcha(browser, url, wait_time=settings.get('captcha_wait_time') if settings else None):
+                logger.warning("Failed to handle captcha, continuing anyway")
+        
+        # Check for site blocking
+        if check_for_site_blocking(browser, url):
+            logger.warning("PubMed access appears to be blocked")
+            return []
+        
+        try:
+            # Find search box and perform search
+            search_input = browser.find_element(By.NAME, "term")
+            search_input.clear()
+            search_input.send_keys(search_term)
+            search_input.send_keys(Keys.RETURN)
+            time.sleep(5)
+            
+            # Check for captchas again after search
+            if detect_captcha(browser)[0]:
+                logger.info("Detected captcha after search on PubMed")
+                if not handle_captcha(browser, browser.current_url, wait_time=settings.get('captcha_wait_time') if settings else None):
+                    logger.warning("Failed to handle captcha, continuing anyway")
+                    return []
+            
+            # Extract results
+            result_elements = browser.find_elements(By.CSS_SELECTOR, ".docsum-content")
+            
+            for i, result_element in enumerate(result_elements[:10]):  # Limit to first 10 results
+                try:
+                    title_elem = result_element.find_element(By.CSS_SELECTOR, ".docsum-title")
+                    title = title_elem.text.strip()
+                    
+                    # Try to get authors
+                    try:
+                        authors_elem = result_element.find_element(By.CSS_SELECTOR, ".docsum-authors")
+                        authors = authors_elem.text.strip()
+                    except:
+                        authors = "Unknown"
+                    
+                    # Try to get year
+                    try:
+                        citation_elem = result_element.find_element(By.CSS_SELECTOR, ".docsum-journal-citation")
+                        year_match = re.search(r'(\d{4})', citation_elem.text)
+                        year = year_match.group(1) if year_match else "Unknown"
+                    except:
+                        year = "Unknown"
+                    
+                    # Get URL of the paper
+                    try:
+                        link = title_elem.find_element(By.XPATH, "./a").get_attribute("href")
+                    except:
+                        link = browser.current_url
+                    
+                    # Get snippet/abstract if available
+                    try:
+                        snippet_elem = result_element.find_element(By.CSS_SELECTOR, ".full-view-snippet")
+                        snippet = snippet_elem.text.strip()
+                    except:
+                        snippet = "No abstract available"
+                    
+                    result = {
+                        'title': title,
+                        'authors': authors,
+                        'year': year,
+                        'url': link,
+                        'snippet': snippet,
+                        'source': 'PubMed'
+                    }
+                    
+                    results.append(result)
+                    
+                    logger.info(f"Found PubMed result: {title}")
+                except Exception as e:
+                    logger.warning(f"Error extracting PubMed result {i}: {str(e)}")
+            
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Error searching PubMed: {str(e)}")
+            return []
+            
+    except Exception as e:
+        logger.warning(f"Error accessing PubMed: {str(e)}")
+        return []
+
+def search_ieee(browser, search_term, settings=None):
+    """
+    Search IEEE Xplore using Selenium.
+    
+    Args:
+        browser: Selenium WebDriver instance
+        search_term: Term to search for (string or dict)
+        settings: Optional dictionary of settings (e.g., 'captcha_wait_time')
+    
+    Returns:
+        list: List of search results
+    """
+    if isinstance(search_term, dict):
+        search_term = search_term.get('search_term', '')
+    
+    results = []
+    
+    try:
+        url = "https://ieeexplore.ieee.org/search/searchresult.jsp"
+        logger.info(f"Searching IEEE Xplore for: {search_term}")
+        
+        # Navigate to IEEE Xplore
+        browser.get(url)
+        time.sleep(5)  # IEEE needs a bit more time to load
+        
+        # Check for captchas and attempt to handle them
+        if detect_captcha(browser)[0]:
+            logger.info("Detected captcha on IEEE Xplore")
+            if not handle_captcha(browser, url, wait_time=settings.get('captcha_wait_time') if settings else None):
+                logger.warning("Failed to handle captcha, continuing anyway")
+        
+        # Check for site blocking
+        if check_for_site_blocking(browser, url):
+            logger.warning("IEEE Xplore access appears to be blocked")
+            return []
+        
+        try:
+            # Find search box and perform search
+            search_input = browser.find_element(By.ID, "LayoutWrapper:BasicSearchForm:SearchField")
+            search_input.clear()
+            search_input.send_keys(search_term)
+            
+            # Try different ways to submit the search
+            try:
+                # First try to press Enter key
+                search_input.send_keys(Keys.RETURN)
+            except Exception as e:
+                logger.warning(f"Failed to submit search with Enter key: {e}")
+                try:
+                    # Then try to submit the form
+                    search_input.submit()
+                except Exception as e:
+                    logger.warning(f"Failed to submit search form: {e}")
+                    try:
+                        # Finally try to find and click a search button
+                        search_buttons = [
+                            (By.CSS_SELECTOR, "input[type='submit']"),
+                            (By.CSS_SELECTOR, "button[type='submit']"),
+                            (By.CSS_SELECTOR, ".search__button"),
+                            (By.CSS_SELECTOR, ".search-btn"),
+                        ]
+                        
+                        for button_selector in search_buttons:
+                            try:
+                                button = browser.find_element(*button_selector)
+                                button.click()
+                                break
+                            except:
+                                continue
+                                
+                    except Exception as e:
+                        logger.error(f"All methods to submit search failed: {e}")
+                        return []
+            
+            # Wait for results to load with multiple selector options
+            wait_time = 10
+            results_found = False
+            result_selectors = [
+                (By.CSS_SELECTOR, ".List-results-items"),
+                (By.CSS_SELECTOR, ".result-item"),
+                (By.CSS_SELECTOR, ".search-results"),
+                (By.CSS_SELECTOR, ".result"),
+            ]
+            
+            for selector in result_selectors:
+                try:
+                    WebDriverWait(browser, 10).until(
+                        EC.presence_of_element_located(selector)
+                    )
+                    results_found = True
+                    logger.info(f"Found results with selector: {selector}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Selector {selector} failed: {e}")
+                    continue
+                    
+            if not results_found:
+                logger.warning("No results found or results selector changed on IEEE Xplore")
+                # Take a screenshot for debugging
+                try:
+                    timestamp = int(time.time())
+                    screenshot_path = f"ieee_debug_{timestamp}.png"
+                    browser.save_screenshot(screenshot_path)
+                    logger.info(f"Saved debug screenshot to {screenshot_path}")
+                except:
+                    pass
+                
+                # Attempt to extract results anyway as a fallback
+                try:
+                    time.sleep(5)  # Wait a bit more just in case
+                    page_source = browser.page_source
+                    if "No results found" in page_source:
+                        logger.warning("IEEE Xplore explicitly reported no results found")
+                        return []
+                except:
+                    pass
+        
+            # Extract results
+            result_elements = []
+            for selector in result_selectors:
+                try:
+                    elements = browser.find_elements(*selector)
+                    if elements:
+                        result_elements = elements
+                        break
+                except:
+                    continue
+        
+            for i, result_element in enumerate(result_elements[:10]):  # Limit to first 10 results
+                try:
+                    title_element = result_element.find_element(By.CSS_SELECTOR, "h3")
+                    title = title_element.text
+                    
+                    # Get URL
+                    try:
+                        link = title_element.get_attribute("href")
+                    except:
+                        link = browser.current_url
+                    
+                    # Try to get authors
+                    try:
+                        authors_elem = result_element.find_element(By.CSS_SELECTOR, ".author-names")
+                        authors = authors_elem.text.strip()
+                    except:
+                        authors = "Unknown"
+                    
+                    # Try to get year
+                    try:
+                        year_elem = result_element.find_element(By.CSS_SELECTOR, ".publisher-info-container")
+                        year_match = re.search(r'(\d{4})', year_elem.text)
+                        year = year_match.group(1) if year_match else "Unknown"
+                    except:
+                        year = "Unknown"
+                    
+                    # Try to get abstract
+                    try:
+                        snippet_elem = result_element.find_element(By.CSS_SELECTOR, ".abstract-text")
+                        snippet = snippet_elem.text.strip()
+                    except:
+                        snippet = "No abstract available."
+                    
+                    result = {
+                        'title': title,
+                        'authors': authors,
+                        'year': year,
+                        'url': link,
+                        'snippet': snippet,
+                        'source': 'IEEE Xplore'
+                    }
+                    
+                    results.append(result)
+                    logger.info(f"Found IEEE result: {title}")
+                    
+                except Exception as e:
+                    logger.warning(f"Error extracting IEEE result {i}: {str(e)}")
+            
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Error searching IEEE Xplore: {str(e)}")
+            return []
+            
+    except Exception as e:
+        logger.warning(f"Error accessing IEEE Xplore: {str(e)}")
+        return []
+
+def search_arxiv(browser, search_term, settings=None):
+    """
+    Search arXiv using Selenium.
+    
+    Args:
+        browser: Selenium WebDriver instance
+        search_term: Term to search for (string or dict)
+        settings: Optional dictionary of settings (e.g., 'captcha_wait_time')
+    
+    Returns:
+        list: List of search results
+    """
+    if isinstance(search_term, dict):
+        search_term = search_term.get('search_term', '')
+    
+    results = []
+    
+    try:
+        url = "https://arxiv.org/search/"
+        logger.info(f"Searching arXiv for: {search_term}")
+        
+        # Navigate to arXiv
+        browser.get(url)
+        time.sleep(3)
+        
+        # Check for captchas and attempt to handle them
+        if detect_captcha(browser)[0]:
+            logger.info("Detected captcha on arXiv")
+            if not handle_captcha(browser, url, wait_time=settings.get('captcha_wait_time') if settings else None):
+                logger.warning("Failed to handle captcha, continuing anyway")
+        
+        # Check for site blocking
+        if check_for_site_blocking(browser, url):
+            logger.warning("arXiv access appears to be blocked")
+            return []
+        
+        try:
+            # Find search box and perform search
+            search_input = browser.find_element(By.NAME, "query")
+            search_input.clear()
+            search_input.send_keys(search_term)
+            search_input.send_keys(Keys.RETURN)
+            time.sleep(3)
+            
+            # Check for captchas again after search
+            if detect_captcha(browser)[0]:
+                logger.info("Detected captcha after search on arXiv")
+                if not handle_captcha(browser, browser.current_url, wait_time=settings.get('captcha_wait_time') if settings else None):
+                    logger.warning("Failed to handle captcha, continuing anyway")
+                    return []
+            
+            # Extract results
+            result_elements = browser.find_elements(By.CSS_SELECTOR, ".arxiv-result")
+            
+            for i, result_element in enumerate(result_elements[:10]):  # Limit to first 10 results
+                try:
+                    title_elem = result_element.find_element(By.CSS_SELECTOR, ".title")
+                    title = title_elem.text.strip()
+                    
+                    # Get URL
+                    try:
+                        link_elem = result_element.find_element(By.CSS_SELECTOR, ".list-title a")
+                        link = link_elem.get_attribute("href")
+                    except:
+                        link = browser.current_url
+                    
+                    # Try to get authors
+                    try:
+                        authors_elem = result_element.find_element(By.CSS_SELECTOR, ".authors")
+                        authors = authors_elem.text.replace("Authors:", "").strip()
+                    except:
+                        authors = "Unknown"
+                    
+                    # Try to get year
+                    try:
+                        date_elem = result_element.find_element(By.CSS_SELECTOR, ".is-size-7")
+                        year_match = re.search(r'(\d{4})', date_elem.text)
+                        year = year_match.group(1) if year_match else "Unknown"
+                    except:
+                        year = "Unknown"
+                    
+                    # Try to get abstract
+                    try:
+                        snippet_elem = result_element.find_element(By.CSS_SELECTOR, ".abstract-full")
+                        snippet = snippet_elem.text.replace("Abstract:", "").strip()
+                    except:
+                        try:
+                            snippet_elem = result_element.find_element(By.CSS_SELECTOR, ".abstract")
+                            snippet = snippet_elem.text.replace("Abstract:", "").strip()
+                        except:
+                            snippet = "No abstract available."
+                    
+                    result = {
+                        'title': title,
+                        'authors': authors,
+                        'year': year,
+                        'url': link,
+                        'snippet': snippet,
+                        'source': 'arXiv'
+                    }
+                    
+                    results.append(result)
+                    logger.info(f"Found arXiv result: {title}")
+                    
+                except Exception as e:
+                    logger.warning(f"Error extracting arXiv result {i}: {str(e)}")
+            
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Error searching arXiv: {str(e)}")
+            return []
+            
+    except Exception as e:
+        logger.warning(f"Error accessing arXiv: {str(e)}")
+        return []
+
+def search_semantic_scholar(browser, search_term, settings=None):
+    """
+    Search Semantic Scholar using Selenium.
+    
+    Args:
+        browser: Selenium WebDriver instance
+        search_term: Term to search for (string or dict)
+        settings: Optional dictionary of settings (e.g., 'captcha_wait_time')
+    
+    Returns:
+        list: List of search results
+    """
+    if isinstance(search_term, dict):
+        search_term = search_term.get('search_term', '')
+    
+    results = []
+    
+    try:
+        url = "https://www.semanticscholar.org/"
+        logger.info(f"Searching Semantic Scholar for: {search_term}")
+        
+        # Navigate to Semantic Scholar
+        browser.get(url)
+        time.sleep(3)
+        
+        # Check for captchas and attempt to handle them
+        if detect_captcha(browser)[0]:
+            logger.info("Detected captcha on Semantic Scholar")
+            if not handle_captcha(browser, url, wait_time=settings.get('captcha_wait_time') if settings else None):
+                logger.warning("Failed to handle captcha, continuing anyway")
+        
+        # Check for site blocking
+        if check_for_site_blocking(browser, url):
+            logger.warning("Semantic Scholar appears to be blocking access")
+            return []
+        
+        try:
+            # Accept cookies if the banner appears
+            try:
+                cookie_button = browser.find_element(By.ID, "onetrust-accept-btn-handler")
+                cookie_button.click()
+                time.sleep(1)
+            except:
+                pass
+                
+            # Find search box and perform search
+            search_input = browser.find_element(By.CSS_SELECTOR, "input[name='q']")
+            search_input.clear()
+            search_input.send_keys(search_term)
+            search_input.send_keys(Keys.RETURN)
+            time.sleep(5)
+            
+            # Check for captchas again after search
+            if detect_captcha(browser)[0]:
+                logger.info("Detected captcha after search on Semantic Scholar")
+                if not handle_captcha(browser, browser.current_url, wait_time=settings.get('captcha_wait_time') if settings else None):
+                    logger.warning("Failed to handle captcha, continuing anyway")
+                    return []
+            
+            # Extract results
+            result_elements = browser.find_elements(By.CSS_SELECTOR, ".cl-paper-row")
+            
+            for i, result_element in enumerate(result_elements[:10]):  # Limit to first 10 results
+                try:
+                    title_elem = result_element.find_element(By.CSS_SELECTOR, ".cl-paper-title")
+                    title = title_elem.text.strip()
+                    
+                    # Get URL
+                    try:
+                        link = title_elem.get_attribute("href")
+                        if not link:
+                            link_elem = title_elem.find_element(By.XPATH, ".//a")
+                            link = link_elem.get_attribute("href")
+                    except:
+                        link = browser.current_url
+                    
+                    # Try to get authors
+                    try:
+                        authors_elem = result_element.find_element(By.CSS_SELECTOR, ".cl-paper-authors")
+                        authors = authors_elem.text.strip()
+                    except:
+                        authors = "Unknown"
+                    
+                    # Try to get year
+                    try:
+                        year_elem = result_element.find_element(By.CSS_SELECTOR, ".cl-paper-publication-date")
+                        year_match = re.search(r'(\d{4})', year_elem.text)
+                        year = year_match.group(1) if year_match else "Unknown"
+                    except:
+                        year = "Unknown"
+                    
+                    # Try to get abstract
+                    try:
+                        snippet_elem = result_element.find_element(By.CSS_SELECTOR, ".cl-paper-abstract")
+                        snippet = snippet_elem.text.strip()
+                    except:
+                        snippet = "No abstract available."
+                    
+                    result = {
+                        'title': title,
+                        'authors': authors,
+                        'year': year,
+                        'url': link,
+                        'snippet': snippet,
+                        'source': 'Semantic Scholar'
+                    }
+                    
+                    results.append(result)
+                    logger.info(f"Found Semantic Scholar result: {title}")
+                    
+                except Exception as e:
+                    logger.warning(f"Error extracting Semantic Scholar result {i}: {str(e)}")
+            
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Error searching Semantic Scholar: {str(e)}")
+            return []
+            
+    except Exception as e:
+        logger.warning(f"Error accessing Semantic Scholar: {str(e)}")
+        return []
+
+def show_search_progress(browser, message, engine=None, progress=0):
+    """
+    Display a search progress indicator in the browser using a simpler approach
+    to avoid Content Security Policy issues.
+    
+    Args:
+        browser: Selenium WebDriver instance
+        message: Main message to display
+        engine: Current search engine (optional)
+        progress: Progress percentage (0-100)
+    """
+    try:
+        # Escape any quotes to prevent JavaScript errors
+        message = message.replace("'", "\\'").replace('"', '\\"')
+        if engine:
+            engine = engine.replace("'", "\\'").replace('"', '\\"')
+        
+        # Create a simpler progress indicator
+        script = """
+            (function() {
+                // Create or get container
+                var container = document.getElementById('search_progress');
+                if (!container) {
+                    container = document.createElement('div');
+                    container.id = 'search_progress';
+                    container.style.position = 'fixed';
+                    container.style.top = '0';
+                    container.style.left = '0';
+                    container.style.width = '100%';
+                    container.style.backgroundColor = '#4285f4';
+                    container.style.color = 'white';
+                    container.style.padding = '15px';
+                    container.style.zIndex = '9999';
+                    container.style.textAlign = 'center';
+                    container.style.fontSize = '16px';
+                    container.style.fontFamily = 'Arial, sans-serif';
+                    div.textContent = '%s';
+                    
+                    // Add engine info if available
+                    if ('%s' && '%s' !== 'None') {
+                        var engineElement = document.createElement('div');
+                        engineElement.textContent = 'Current engine: ' + '%s';
+                        engineElement.style.marginTop = '5px';
+                        container.appendChild(engineElement);
+                    }
+                    
+                    // Add progress percentage
+                    var percentElement = document.createElement('div');
+                    percentElement.textContent = '%s%%';
+                    percentElement.style.marginTop = '5px';
+                    container.appendChild(percentElement);
+                    
+                    // Add progress bar container
+                    var progressBarContainer = document.createElement('div');
+                    progressBarContainer.style.marginTop = '10px';
+                    progressBarContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.3)';
+                    progressBarContainer.style.height = '10px';
+                    progressBarContainer.style.borderRadius = '5px';
+                    container.appendChild(progressBarContainer);
+                    
+                    // Add progress bar
+                    var progressBar = document.createElement('div');
+                    progressBar.style.width = '%s%%';
+                    progressBar.style.height = '100%%';
+                    progressBar.style.backgroundColor = 'white';
+                    progressBar.style.borderRadius = '5px';
+                    progressBarContainer.appendChild(progressBar);
+                }
+                
+                // Update existing container
+                else {
+                    container.innerHTML = '';
+                    var msgElement = document.createElement('div');
+                    msgElement.style.fontWeight = 'bold';
+                    msgElement.textContent = '%s';
+                    container.appendChild(msgElement);
+                    
+                    if ('%s' && '%s' !== 'None') {
+                        var engineElement = document.createElement('div');
+                        engineElement.textContent = 'Current engine: ' + '%s';
+                        engineElement.style.marginTop = '5px';
+                        container.appendChild(engineElement);
+                    }
+                    
+                    var percentElement = document.createElement('div');
+                    percentElement.textContent = '%s%%';
+                    percentElement.style.marginTop = '5px';
+                    container.appendChild(percentElement);
+                    
+                    var progressBarContainer = document.createElement('div');
+                    progressBarContainer.style.marginTop = '10px';
+                    progressBarContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.3)';
+                    progressBarContainer.style.height = '10px';
+                    progressBarContainer.style.borderRadius = '5px';
+                    container.appendChild(progressBarContainer);
+                    
+                    var progressBar = document.createElement('div');
+                    progressBar.style.width = '%s%%';
+                    progressBar.style.height = '100%%';
+                    progressBar.style.backgroundColor = 'white';
+                    progressBar.style.borderRadius = '5px';
+                    progressBarContainer.appendChild(progressBar);
+                }
+                
+                // Append to body if not already
+                if (!document.body.contains(container)) {
+                    document.body.appendChild(container);
+                }
+            })();
+        """ % (message, engine, engine, engine, progress, progress)
+        
+        browser.execute_script(script)
+    except Exception as e:
+        logger.warning(f"Failed to show search progress: {e}")
+
+def hide_search_progress(browser):
+    """
+    Hide the search progress indicator.
+    
+    Args:
+        browser: Selenium WebDriver instance
+    """
+    try:
+        browser.execute_script("""
+            const notification = document.getElementById('search_progress');
+            if (notification) {
+                notification.remove();
+            }
+        """)
+    except Exception as e:
+        logger.warning(f"Failed to hide search progress: {e}")
+
+def check_for_site_blocking(browser, url):
+    """
+    Check if a site is blocking our access.
+    
+    Args:
+        browser: Selenium WebDriver instance
+        url: URL of the site to check
+        
+    Returns:
+        bool: True if site appears to be blocking access, False otherwise
+        
+    Raises:
+        BlockedSiteException: If the site is in blocked_sites list or appears to be blocking access
+    """
+    # First check if the site is in the blocked sites list
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc
+    
+    if is_site_blocked(domain):
+        logger.warning(f"Site is in blocked sites list: {domain}")
+        raise BlockedSiteException(f"Site is in blocked sites list: {domain}")
+    
+    try:
+        # Check for common blocking indicators
+        blocking_indicators = [
+            "Access Denied",
+            "Forbidden",
+            "Not Found",
+            "404",
+            "403",
+            "Your request has been blocked",
+            "Our systems have detected unusual traffic",
+            "Please enable cookies",
+            "Please enable JavaScript"
+        ]
+        
+        page_source = browser.page_source.lower()
+        
+        for indicator in blocking_indicators:
+            if indicator.lower() in page_source:
+                logger.warning(f"Site appears to be blocking access: {url}")
+                raise BlockedSiteException(f"Site appears to be blocking access: {url} (Detected: {indicator})")
+        
+        # If no indicators found, assume site is not blocking
+        return False
+    
+    except BlockedSiteException:
+        raise
+    except Exception as e:
+        logger.warning(f"Error checking for site blocking: {e}")
+        return False
+
+def handle_cookie_consent(browser):
+    """
+    Handle cookie consent banners.
+    
+    Args:
+        browser: Selenium WebDriver instance
+        
+    Returns:
+        bool: True if cookie consent was handled, False otherwise
+    """
+    try:
+        # Check for common cookie consent banners
+        consent_indicators = [
+            "cookie consent",
+            "accept cookies",
+            "cookie policy",
+            "cookie notice"
+        ]
+        
+        page_source = browser.page_source.lower()
+        
+        for indicator in consent_indicators:
+            if indicator in page_source:
+                # Try to find and click the accept button
+                try:
+                    accept_button = browser.find_element(By.XPATH, "//button[contains(text(), 'Accept') or contains(text(), 'Agree')]")
+                    accept_button.click()
+                    logger.info("Cookie consent handled")
+                    return True
+                except:
+                    pass
+        
+        # If no indicators found, assume no cookie consent is required
+        return False
+    
+    except Exception as e:
+        logger.warning(f"Error handling cookie consent: {e}")
+        return False
+
+def search_duckduckgo(browser, search_term, settings=None):
+    """
+    Search DuckDuckGo for academic papers and extract results.
+    
+    Args:
+        browser: Selenium WebDriver
+        search_term: Search query
+        settings: Dictionary with settings, including:
+            - prioritize_pdf: Whether to prioritize PDF results (default: True)
+            - max_results: Maximum number of results to return
+            - debug: Whether to enable debug mode (default: False)
+    
+    Returns:
+        list: List of dictionaries containing search results
+    """
+    if settings is None:
+        settings = {}
+    
+    prioritize_pdf = settings.get('prioritize_pdf', True)
+    max_results = settings.get('max_results', 10)
+    debug_mode = settings.get('debug', False)
+    
+    results = []
+    
+    # Process search term if it's a dictionary
+    if isinstance(search_term, dict):
+        if 'query' in search_term:
+            search_term = search_term['query']
+        elif 'topic' in search_term:
+            search_term = search_term['topic']
+    
+    # Add filetype:pdf to search term if prioritizing PDFs
+    if prioritize_pdf and 'filetype:pdf' not in search_term.lower():
+        search_term = f"{search_term} filetype:pdf"
+    
+    logger.info(f"DuckDuckGo search term: {search_term}")
+    
+    # Safely show search progress
+    def show_progress(message=None):
+        try:
+            browser.execute_script(
+                f"""
+                if (!document.getElementById('academic-search-progress')) {{
+                    var div = document.createElement('div');
+                    div.id = 'academic-search-progress';
+                    div.style.position = 'fixed';
+                    div.style.top = '0';
+                    div.style.left = '0';
+                    div.style.width = '100%';
+                    div.style.backgroundColor = '#4285f4';
+                    div.style.color = 'white';
+                    div.style.padding = '10px';
+                    div.style.zIndex = '9999';
+                    div.style.textAlign = 'center';
+                    div.style.fontSize = '16px';
+                    div.style.fontFamily = 'Arial, sans-serif';
+                    div.textContent = '{message or "Searching DuckDuckGo for academic papers..."}';
+                    document.body.appendChild(div);
+                }}
+                """
+            )
+        except Exception as e:
+            logger.warning(f"Failed to show search progress: {e}")
+    
+    # Safely hide search progress
+    def hide_progress():
+        try:
+            browser.execute_script(
+                """
+                var div = document.getElementById('academic-search-progress');
+                if (div) {
+                    div.parentNode.removeChild(div);
+                }
+                """
+            )
+        except Exception as e:
+            logger.warning(f"Failed to hide search progress: {e}")
+    
+    # Debug function to log the page source
+    def debug_page():
+        if debug_mode:
+            try:
+                logger.info("=" * 50)
+                logger.info(f"Current URL: {browser.current_url}")
+                logger.info("Page Title: " + browser.title)
+                
+                # Save screenshot
+                timestamp = int(time.time())
+                screenshot_path = f"duckduckgo_debug_{timestamp}.png"
+                browser.save_screenshot(screenshot_path)
+                logger.info(f"Debug screenshot saved to {screenshot_path}")
+                
+                # Log HTML source in chunks
+                source = browser.page_source
+                logger.info(f"Page source length: {len(source)} characters")
+                logger.info("=" * 50)
+            except Exception as e:
+                logger.error(f"Debug error: {e}")
+    
+    try:
+        logger.info("Using DuckDuckGo browser mode")
+        
+        # Show progress
+        show_progress()
+        
+        # Navigate to DuckDuckGo
+        browser.get("https://duckduckgo.com/")
+        time.sleep(2)
+        
+        if debug_mode:
+            debug_page()
+        
+        # Try different selectors for the search box 
+        search_box = None
+        search_selectors = [
+            "input[name='q']",
+            "#search_form_input_homepage",
+            "#search_form_input",
+            "input[type='text']",
+            "input.js-search-input"
+        ]
+        
+        for selector in search_selectors:
+            try:
+                logger.info(f"Trying search box selector: {selector}")
+                search_box = WebDriverWait(browser, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                logger.info(f"Found search box using selector: {selector}")
+                break
+            except Exception as e:
+                logger.warning(f"Selector {selector} failed: {e}")
+                continue
+        
+        if not search_box:
+            logger.error("Could not find search box on DuckDuckGo")
+            hide_progress()
+            debug_page()
+            return results
+        
+        # Clear and enter search term
+        search_box.clear()
+        search_box.send_keys(search_term)
+        logger.info(f"Entered search term: {search_term}")
+        
+        # Try different methods to submit the search
+        submit_success = False
+        
+        try:
+            # Method 1: Press Enter
+            logger.info("Trying to submit search with Enter key")
+            search_box.send_keys(Keys.RETURN)
+            submit_success = True
+        except Exception as e:
+            logger.warning(f"Enter key submission failed: {e}")
+            try:
+                # Method 2: Click search button
+                logger.info("Trying to submit search with search button")
+                submit_buttons = [
+                    "input[type='submit']",
+                    "button[type='submit']",
+                    ".search__button",
+                    ".search-btn"
+                ]
+                
+                for button_selector in submit_buttons:
+                    try:
+                        submit_button = browser.find_element(By.CSS_SELECTOR, button_selector)
+                        submit_button.click()
+                        submit_success = True
+                        logger.info(f"Clicked search button with selector: {button_selector}")
+                        break
+                    except Exception as button_e:
+                        logger.warning(f"Button selector {button_selector} failed: {button_e}")
+                        continue
+            except Exception as e2:
+                logger.warning(f"Button click submission failed: {e2}")
+                try:
+                    # Method 3: Submit the form
+                    search_form = browser.find_element(By.CSS_SELECTOR, "#search_form")
+                    search_form.submit()
+                    submit_success = True
+                    logger.info("Form submission successful")
+                except Exception as e3:
+                    logger.error(f"All methods to submit search failed: {e3}")
+                    hide_progress()
+                    debug_page()
+                    return results
+        
+        if submit_success:
+            logger.info("Search submission successful")
+            # Wait for results to load
+            time.sleep(3)
+            
+            if debug_mode:
+                debug_page()
+            
+            # Update progress
+            show_progress("Processing search results...")
+            
+            # Look for "no results" message
+            try:
+                no_results = browser.find_element(By.CSS_SELECTOR, ".no-results")
+                if "No results found" in no_results.text:
+                    logger.warning("No results found on DuckDuckGo")
+                    hide_progress()
+                    return results
+            except:
+                pass  # No "no results" message found, continue
+            
+            # Different possible result selectors
+            result_selectors = [
+                ".result__body", 
+                ".result", 
+                ".result-link",
+                ".nrn-react-div",
+                "article",
+                ".web-result",
+                ".links_main",
+                ".serp__results .react-results--main .react-results"
+            ]
+            
+            result_elements = []
+            
+            for selector in result_selectors:
+                try:
+                    logger.info(f"Trying result selector: {selector}")
+                    result_elements = browser.find_elements(By.CSS_SELECTOR, selector)
+                    if result_elements:
+                        logger.info(f"Found {len(result_elements)} results with selector: {selector}")
+                        break
+                except Exception as e:
+                    logger.warning(f"Result selector {selector} failed: {e}")
+                    continue
+            
+            logger.info(f"Found {len(result_elements)} potential results")
+            
+            if not result_elements and debug_mode:
+                logger.warning("No result elements found with standard selectors. Trying generic links.")
+                try:
+                    # As a last resort, try to find any links that might be results
+                    links = browser.find_elements(By.TAG_NAME, "a")
+                    logger.info(f"Found {len(links)} generic links on the page")
+                    
+                    # Filter links that look like results (non-empty text, has href)
+                    result_links = []
+                    for link in links:
+                        try:
+                            href = link.get_attribute("href")
+                            text = link.text.strip()
+                            if href and text and not href.startswith("https://duckduckgo.com"):
+                                result_links.append(link)
+                        except:
+                            continue
+                    
+                    logger.info(f"Filtered to {len(result_links)} potential result links")
+                    
+                    # If we found some links, create results from them
+                    for link in result_links[:max_results]:
+                        try:
+                            title = link.text.strip() or "Unknown Title"
+                            url = link.get_attribute("href")
+                            
+                            # Skip if no URL or it's an advertisement
+                            if not url or "duckduckgo.com/y.js" in url:
+                                continue
+                                
+                            is_pdf = url.lower().endswith(".pdf") or "pdf" in url.lower()
+                            
+                            # Create result entry
+                            result_entry = {
+                                "title": title,
+                                "url": url,
+                                "snippet": "",
+                                "source": "DuckDuckGo",
+                                "is_pdf": is_pdf,
+                            }
+                            
+                            results.append(result_entry)
+                            
+                        except Exception as e:
+                            logger.error(f"Error processing generic link: {e}")
+                            continue
+                except Exception as e:
+                    logger.error(f"Error processing generic links: {e}")
+            
+            for result in result_elements[:max_results]:
+                try:
+                    # Extract title and link using different possible selectors
+                    title_element = None
+                    link_element = None
+                    
+                    # Try to find title element
+                    for title_selector in [".result__title a", "h2 a", "a.result__a", "a", "h3 a", ".title a"]:
+                        try:
+                            title_elements = result.find_elements(By.CSS_SELECTOR, title_selector)
+                            if title_elements:
+                                title_element = title_elements[0]
+                                logger.info(f"Found title element with selector: {title_selector}")
+                                break
+                        except:
+                            continue
+                    
+                    if not title_element:
+                        logger.warning("No title element found for result")
+                        continue
+                    
+                    title = title_element.text.strip()
+                    logger.info(f"Found result title: {title}")
+                    
+                    # Use the title element as the link element
+                    link_element = title_element
+                    
+                    url = link_element.get_attribute("href")
+                    logger.info(f"Found result URL: {url}")
+                    
+                    # Skip if no URL found or if it's an advertisement
+                    if not url or "duckduckgo.com/y.js" in url:
+                        logger.warning(f"Skipping result with invalid URL: {url}")
+                        continue
+                    
+                    # Try to extract snippet
+                    snippet = ""
+                    for snippet_selector in [".result__snippet", ".result__extras", ".result__body", ".snippet", ".subtitle", "p"]:
+                        try:
+                            snippet_element = result.find_element(By.CSS_SELECTOR, snippet_selector)
+                            snippet = snippet_element.text.strip()
+                            if snippet:
+                                logger.info(f"Found snippet with selector: {snippet_selector}")
+                                break
+                        except:
+                            continue
+                    
+                    # Filter for PDF results if prioritizing PDFs
+                    is_pdf = False
+                    if prioritize_pdf:
+                        is_pdf = (
+                            url.lower().endswith(".pdf") or 
+                            "filetype:pdf" in snippet.lower() or
+                            "pdf" in url.lower() or
+                            "[PDF]" in title
+                        )
+                        
+                        if not is_pdf and "pdf" not in url.lower() and "pdf" not in snippet.lower():
+                            logger.info(f"Skipping non-PDF result: {title}")
+                            continue
+                        
+                        logger.info(f"Found PDF result: {title}")
+                    
+                    # Extract year if available 
+                    year = None
+                    year_match = re.search(r'\b(19|20)\d{2}\b', snippet)
+                    if year_match:
+                        year = year_match.group(0)
+                    
+                    # Extract author if available (names followed by et al. or multiple names)
+                    authors = None
+                    author_match = re.search(r'([A-Z][a-z]+ (?:[A-Z][a-z]+))(?: et al\.?|,? (?:and |& )?[A-Z][a-z]+ (?:[A-Z][a-z]+))', snippet)
+                    if author_match:
+                        authors = author_match.group(0)
+                    
+                    # Extract journal if available (text in italics or between quotes)
+                    journal = None
+                    journal_match = re.search(r'["\']([^"\']+)["\']', snippet)
+                    if journal_match:
+                        journal = journal_match.group(1)
+                    
+                    # Create result entry
+                    result_entry = {
+                        "title": title,
+                        "url": url,
+                        "snippet": snippet,
+                        "source": "DuckDuckGo",
+                        "is_pdf": is_pdf,
+                    }
+                    
+                    # Add optional fields if found
+                    if year:
+                        result_entry["year"] = year
+                    if authors:
+                        result_entry["authors"] = authors
+                    if journal:
+                        result_entry["journal"] = journal
+                    
+                    results.append(result_entry)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing result: {e}")
+                    continue
+        
+        hide_progress()
+        return results
+        
+    except WebDriverException as e:
+        logger.error(f"WebDriver error when searching DuckDuckGo: {e}")
+        debug_page()
+        hide_progress()
+        return results
+    except Exception as e:
+        logger.error(f"Unexpected error when searching DuckDuckGo: {e}")
+        debug_page()
+        hide_progress()
+        return results
+
+def search_academic_databases(topics_subtopics=None, settings=None, browsers=None, headless=True):
+    """
+    Search for academic papers from Google Scholar and ResearchGate.
+    
+    Args:
+        topics_subtopics (list or dict): Either a list of dictionaries with 'topic' and 'subtopics' keys,
+                                         or a list of topics (strings)
+        settings (dict): Dictionary of settings
+        browsers (list): List of Selenium WebDriver instances (optional)
+        headless (bool): Whether to run browsers in headless mode
+    
+    Returns:
+        dict: Dictionary mapping topics to lists of search results
+    """
+    if settings is None:
+        settings = {}
+    
+    # Default settings
+    default_settings = {
+        'captcha_wait_time': CAPTCHA_WAIT_TIME,
+        'engines': ['google_scholar', 'research_gate', 'pubmed', 'arxiv', 'duckduckgo'],
+        'max_results_per_topic': 10,
+        'browser_count': 1
+    }
+    
+    # Update settings with defaults for missing keys
+    for key, value in default_settings.items():
+        if key not in settings:
+            settings[key] = value
+    
+    # Special handling for DuckDuckGo-only mode
+    if 'duckduckgo_only' in settings and settings['duckduckgo_only']:
+        settings['engines'] = ['duckduckgo']
+        logger.info("Using DuckDuckGo as the exclusive search engine")
+    
+    # Ensure browsers is a list
+    if browsers is None:
+        browsers = []
+    
+    # Load blocked sites at the start
+    load_blocked_sites()
+    
+    # Set up browsers if not provided
+    if not browsers:
+        browser_type = settings.get('browser_type', None)
+        for i in range(settings.get('browser_count', 1)):
+            try:
+                browser = _create_browser(headless=headless, browser_type=browser_type)
+                browsers.append(browser)
+            except Exception as e:
+                logger.error(f"Error setting up browser {i}: {e}")
+                # Try to create at least one browser
+                if i == 0:
+                    continue
+    
+    # If no browsers are available, return empty results
+    if not browsers:
+        logger.error("No browsers available for searching")
+        return {}
+    
+    # Distribute browsers
+    google_scholar_browser = browsers[0]
+    research_gate_browser = browsers[-1]  # Use the last browser for ResearchGate
+    
+    all_results = {}
+    
+    # Search for each topic
+    for topic in topics_subtopics:
+        logger.info(f"Searching for topic: {topic}")
+        
+        # Google Scholar search
+        google_scholar_results = search_google_scholar(google_scholar_browser, topic, settings=settings)
+        
+        # ResearchGate search
+        research_gate_results = search_research_gate(research_gate_browser, topic, settings=settings)
+        
+        # Combine results
+        topic_results = google_scholar_results + research_gate_results
+        
+        # Sort results by relevance (using a simple heuristic)
+        topic_results.sort(key=lambda x: 
+            (0 if x.get('is_mock', False) else 1,  # Real results first
+             len(x.get('snippet', '')) if 'snippet' in x else 0),  # Then by snippet length
+            reverse=True)
+        
+        all_results[topic] = topic_results
+        logger.info(f"Found {len(topic_results)} results for topic: {topic}")
+        
+        # Search for subtopics if available
+        if 'subtopics' in topics_subtopics and topics_subtopics['subtopics']:
+            for subtopic in topics_subtopics['subtopics']:
+                logger.info(f"Searching for subtopic: {subtopic}")
+                
+                # Google Scholar search for subtopic
+                subtopic_google_results = search_google_scholar(google_scholar_browser, f"{topic} {subtopic}", settings=settings)
+                
+                # ResearchGate search for subtopic
+                subtopic_research_results = search_research_gate(research_gate_browser, f"{topic} {subtopic}", settings=settings)
+                
+                # Combine results
+                subtopic_results = subtopic_google_results + subtopic_research_results
+                
+                # Sort results by relevance
+                subtopic_results.sort(key=lambda x: 
+                    (0 if x.get('is_mock', False) else 1,  # Real results first
+                     len(x.get('snippet', '')) if 'snippet' in x else 0),  # Then by snippet length
+                    reverse=True)
+                
+                all_results[f"{topic} - {subtopic}"] = subtopic_results
+                logger.info(f"Found {len(subtopic_results)} results for subtopic: {subtopic}")
+    
+    # Clean up browsers if we created them
+    if not browsers:
+        for browser in browsers:
+            try:
+                browser.quit()
+            except:
+                pass
+    
+    # Save blocked sites at the end
+    save_blocked_sites()
+    
+    return all_results
+
+def sanitize_search_term(search_term):
+    """
+    Sanitize a search term to make it safe for use in URLs and JavaScript.
+    
+    Args:
+        search_term (str): The search term to sanitize
+        
+    Returns:
+        str: The sanitized search term
+    """
+    if isinstance(search_term, dict):
+        search_term = search_term.get('search_term', '')
+    
+    # Convert to string if not already
+    search_term = str(search_term)
+    
+    # Replace multiple spaces with a single space
+    search_term = ' '.join(search_term.split())
+    
+    # Remove or escape special characters that might cause issues
+    search_term = search_term.replace("'", " ").replace('"', " ")
+    
+    # Truncate very long search terms
+    if len(search_term) > 150:
+        search_term = search_term[:150] + "..."
+        
+    return search_term.strip()

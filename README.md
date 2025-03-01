@@ -5,6 +5,7 @@ This application automates the process of literature review and academic paper w
 ## Features
 
 - Generates topics and subtopics from a problem statement
+- Creates a detailed research roadmap with objectives, methodology, and timeline
 - Automatically searches academic databases (ResearchGate, Google Scholar)
 - Analyzes search results using Google's Gemini Flash Vision LLM
 - Dynamically expands topics based on found literature

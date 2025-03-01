@@ -106,6 +106,20 @@ def generate_topics_subtopics(problem_statement):
                 ]
         
         logger.info(f"Generated {len(topics_subtopics)} topics with their subtopics")
+        
+        # Log the topics in a more descriptive and readable format
+        for idx, topic in enumerate(topics_subtopics, 1):
+            topic_name = topic.get('topic', 'Unknown Topic')
+            subtopics = topic.get('subtopics', [])
+            
+            # Format the topic index and name without truncation
+            formatted_topic = f"{idx}. {topic_name}"
+            logger.info(f"Topic {formatted_topic}")
+            
+            # Log each subtopic
+            for sub_idx, subtopic in enumerate(subtopics, 1):
+                logger.info(f"   {sub_idx}. {subtopic}")
+                
         return topics_subtopics
         
     except Exception as e:

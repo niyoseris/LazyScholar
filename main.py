@@ -15,6 +15,8 @@ from topic_generator import generate_topics_subtopics
 import web_scraper
 import content_analyzer
 from text_compiler import compile_paper, update_final_document
+from roadmap_generator import generate_research_roadmap, save_roadmap
+from reference_manager import ReferenceManager
 
 # Configure logging
 logging.basicConfig(
@@ -290,23 +292,20 @@ Future research should focus on extending the work presented here, with particul
     
     return paper_content, list(set(references))  # Remove duplicates
 
-def research_subtopic_sequentially(subtopic, parent_topic, browser, settings=None):
+def research_subtopic(browser, subtopic, parent_topic="", settings=None):
     """
-    Research a single subtopic thoroughly before moving to the next.
+    Research a specific subtopic by searching academic databases and extracting relevant information.
     
     Args:
-        subtopic (str): The subtopic to research
-        parent_topic (str): The parent topic this subtopic belongs to
-        browser: The browser instance to use for searching
-        settings (dict): Settings for the search
+        browser: Browser instance for web interactions
+        subtopic: The subtopic to research
+        parent_topic: The parent topic this subtopic belongs to
+        settings: Dictionary of settings to pass to web_scraper
         
     Returns:
-        dict: Analysis results for this subtopic
+        dict: Aggregated findings from the research
     """
-    if settings is None:
-        settings = {}
-    
-    display_process_status("RESEARCH START", 
+    display_process_status("RESEARCHING", 
                            f"Researching subtopic: '{subtopic}' under topic '{parent_topic}'", 
                            {"search_term": subtopic, "parent": parent_topic})
     
@@ -316,36 +315,124 @@ def research_subtopic_sequentially(subtopic, parent_topic, browser, settings=Non
         search_term = f"{parent_topic} {subtopic}"
     
     logger.info("Researching subtopic: '%s' under topic '%s'", subtopic, parent_topic)
-    logger.info("Searching Google Scholar for: %s", search_term)
     
-    # Perform search with Google Scholar
-    try:
-        search_results = web_scraper.search_google_scholar(browser, search_term)
+    if settings is None:
+        settings = {}
+    
+    # Perform search with all available search engines
+    search_results = []
+    failed_engines = []
+    search_attempts = 0
+    
+    # Define search engines to try, in order of priority
+    search_engines = [
+        {"name": "Google Scholar", "tried": False},
+        {"name": "Semantic Scholar", "tried": False},
+        {"name": "arXiv", "tried": False},
+        {"name": "PubMed", "tried": False},
+        {"name": "IEEE Xplore", "tried": False},
+        {"name": "ResearchGate", "tried": False},
+        {"name": "DuckDuckGo", "tried": False}
+    ]
+    
+    # Filter search engines based on settings
+    if 'search_engines' in settings:
+        filtered_engines = []
+        for engine in search_engines:
+            if engine['name'] in settings['search_engines']:
+                filtered_engines.append(engine)
+        search_engines = filtered_engines
+    
+    # Try search engines until we have enough results or tried them all
+    while len(search_results) < 10 and search_attempts < len(search_engines):
+        # Find the next untried engine
+        current_engine = None
+        for engine in search_engines:
+            if not engine["tried"]:
+                current_engine = engine
+                break
         
-        # Try ResearchGate if we didn't get many results
-        if len(search_results) < 3:
-            logger.info("Not enough results from Google Scholar, trying ResearchGate")
+        if not current_engine:
+            break  # All engines tried
+        
+        # Mark this engine as tried
+        current_engine["tried"] = True
+        search_attempts += 1
+        
+        # Calculate progress percentage
+        progress_percent = int((search_attempts / len(search_engines)) * 100)
+        
+        try:
+            logger.info(f"Searching {current_engine['name']} for: {search_term}")
+            display_process_status("SEARCHING", 
+                                  f"Searching {current_engine['name']} for '{search_term}'")
+            
+            # Show progress in browser
+            web_scraper.show_search_progress(
+                browser, 
+                f"Researching: {search_term}", 
+                engine=current_engine['name'], 
+                progress=progress_percent
+            )
+            
+            # Sanitize search term
+            sanitized_search_term = web_scraper.sanitize_search_term(search_term)
+            
+            # Call the search function
             try:
-                rg_results = web_scraper.search_research_gate(browser, search_term)
-                search_results.extend(rg_results)
+                engine_results = web_scraper.get_search_engine_function(current_engine["name"])(
+                    browser, sanitized_search_term, settings=settings
+                )
+                
+                if engine_results:
+                    logger.info(f"Found {len(engine_results)} results from {current_engine['name']}")
+                    search_results.extend(engine_results)
+                    display_process_status("RESULTS FOUND", 
+                                          f"Found {len(engine_results)} results from {current_engine['name']}")
+                else:
+                    logger.warning(f"No results found from {current_engine['name']}")
+                    failed_engines.append(current_engine["name"])
+                    display_process_status("NO RESULTS", 
+                                          f"No results found from {current_engine['name']}")
+            except web_scraper.BlockedSiteException as e:
+                logger.warning(f"{current_engine['name']} is blocked: {str(e)}")
+                failed_engines.append(f"{current_engine['name']} (Blocked)")
+                display_process_status("SITE BLOCKED", 
+                                      f"{current_engine['name']} is blocked", 
+                                      {"error": str(e)})
             except Exception as e:
-                logger.warning(f"Error searching ResearchGate: {str(e)}")
-        
-        logger.info("Found %d results for subtopic: %s", len(search_results), subtopic)
-        display_process_status("SEARCH RESULTS", 
-                               f"Found {len(search_results)} results for '{subtopic}'", 
-                               search_results[:3])  # Show first 3 results only
-    except Exception as e:
-        logger.error(f"Error during search for '{search_term}': {str(e)}", exc_info=True)
-        display_process_status("SEARCH ERROR", 
-                              f"Error searching for '{search_term}'", 
-                              {"error": str(e)})
-        # Return empty results
+                logger.error(f"Error searching {current_engine['name']}: {str(e)}")
+                failed_engines.append(f"{current_engine['name']} (Error: {str(e)})")
+                display_process_status("SEARCH ERROR", 
+                                      f"Error searching {current_engine['name']}", 
+                                      {"error": str(e)})
+        except Exception as e:
+            logger.error(f"Error searching {current_engine['name']}: {str(e)}")
+            failed_engines.append(f"{current_engine['name']} (Error: {str(e)})")
+            display_process_status("SEARCH ERROR", 
+                                  f"Error searching {current_engine['name']}", 
+                                  {"error": str(e)})
+    
+    # Hide progress indicator when done
+    web_scraper.hide_search_progress(browser)
+    
+    # Display overall results
+    if search_results:
+        logger.info(f"Found a total of {len(search_results)} results for subtopic: {subtopic}")
+        display_process_status("SEARCH COMPLETE", 
+                              f"Found {len(search_results)} total results for '{subtopic}'", 
+                              {"result_count": len(search_results), 
+                               "engines_used": [e["name"] for e in search_engines if e["tried"] and e["name"] not in failed_engines]})
+    else:
+        logger.warning(f"No results found for '{search_term}' across any search engines")
+        display_process_status("NO RESULTS", 
+                              f"No search results found for '{subtopic}' - check for CAPTCHA challenges in the browser window",
+                              {"failed_engines": failed_engines})
         return {
-            "key_findings": ["Search failed: " + str(e)],
+            "key_findings": ["No results found. This could be due to CAPTCHA challenges or access restrictions."],
             "methodologies": [],
             "cited_authors": [],
-            "research_gaps": [],
+            "research_gaps": ["Research restricted due to access limitations."],
             "theoretical_frameworks": []
         }
     
@@ -354,14 +441,18 @@ def research_subtopic_sequentially(subtopic, parent_topic, browser, settings=Non
     
     if not search_results:
         display_process_status("NO RESULTS", 
-                              f"No search results found for '{subtopic}'")
+                              f"No search results found for '{subtopic}' - check for CAPTCHA challenges in the browser window")
         return {
-            "key_findings": ["No results found for this subtopic"],
+            "key_findings": ["No results found. This could be due to CAPTCHA challenges or access restrictions."],
             "methodologies": [],
             "cited_authors": [],
-            "research_gaps": [],
+            "research_gaps": ["Research restricted due to access limitations."],
             "theoretical_frameworks": []
         }
+        
+    # Continue with research paper analysis for any results we found
+    display_process_status("ANALYZING", 
+                         f"Analyzing {len(search_results)} papers for '{subtopic}'")
     
     for i, paper_result in enumerate(search_results[:5]):  # Process top 5 papers
         logger.info("Analyzing paper %d/%d: %s", i+1, min(5, len(search_results)), paper_result.get('title', 'Untitled'))
@@ -669,11 +760,11 @@ def save_subtopic_results(subtopic, parent_topic, aggregate_findings, analyzed_p
 
 def sequential_research_workflow(topics_subtopics, settings=None):
     """Execute a sequential research workflow where each subtopic is researched thoroughly
-    before moving to the next subtopic.
+    before moving to the next.
     
     Args:
         topics_subtopics (list): List of topic dictionaries with subtopics
-        settings (dict): Settings for the search
+        settings (dict): Settings for the search and analysis
         
     Returns:
         dict: Analyzed content organized by search term
@@ -687,7 +778,7 @@ def sequential_research_workflow(topics_subtopics, settings=None):
     
     # Set up the browser
     logger.info("Setting up browser for sequential research")
-    browser = web_scraper.setup_browser(headless=settings.get('headless', False))
+    browser = web_scraper.setup_browser(headless=settings.get('headless', False), browser_type=settings.get('browser_type'))
     
     # Initialize results container
     all_research_results = {}
@@ -700,7 +791,7 @@ def sequential_research_workflow(topics_subtopics, settings=None):
             logger.info(f"Researching main topic: {topic}")
             
             try:
-                topic_results = research_subtopic_sequentially(topic, "", browser, settings)
+                topic_results = research_subtopic(browser, topic, "", settings=settings)
                 all_research_results[topic] = topic_results
             except Exception as e:
                 logger.error(f"Error researching topic '{topic}': {str(e)}", exc_info=True)
@@ -726,7 +817,7 @@ def sequential_research_workflow(topics_subtopics, settings=None):
                 search_term = f"{topic} {subtopic}"
                 
                 try:
-                    subtopic_results = research_subtopic_sequentially(subtopic, topic, browser, settings)
+                    subtopic_results = research_subtopic(browser, subtopic, topic, settings=settings)
                     all_research_results[search_term] = subtopic_results
                 except Exception as e:
                     logger.error(f"Error researching subtopic '{subtopic}' under '{topic}': {str(e)}", exc_info=True)
@@ -755,122 +846,213 @@ def sequential_research_workflow(topics_subtopics, settings=None):
                          
     return all_research_results
 
+def process_topic_with_subtopics(topic_data, args, browser=None, search_engines=None, search_settings=None):
+    """Process a topic with its subtopics."""
+    topic = topic_data.get("topic", "")
+    subtopics = topic_data.get("subtopics", [])
+    
+    if search_engines is None:
+        # Default search engines if not specified
+        search_engines = ["Google Scholar", "PubMed", "IEEE Xplore"]
+    
+    if search_settings is None:
+        search_settings = {}
+    
+    if not subtopics:
+        logger.warning(f"No subtopics found for topic: {topic}")
+        return
+    
+    logger.info(f"Processing topic: {topic} with {len(subtopics)} subtopics")
+    
+    # Print information about subtopics being processed
+    display_process_status("RESEARCH", f"Processing subtopics for: {topic}", {
+        "Topic": topic,
+        "Subtopics": subtopics
+    })
+    
+    # Process each subtopic
+    for subtopic in subtopics:
+        search_term = f"{subtopic}"
+        parent_topic = topic
+        
+        # Print information about the subtopic being researched
+        display_process_status("RESEARCH", f"Researching subtopic: '{subtopic}' under topic '{parent_topic}'", {
+            "search_term": search_term,
+            "parent": parent_topic
+        })
+        
+        logger.info(f"Researching subtopic: '{subtopic}' under topic '{parent_topic}'")
+        
+        results = []
+        failed_engines = []
+        
+        # Check if we're using DuckDuckGo
+        if "DuckDuckGo" in search_engines or "duckduckgo" in search_engines:
+            duckduckgo_search_term = f"{parent_topic} {search_term}"
+            logger.info(f"Searching DuckDuckGo for: {duckduckgo_search_term}")
+            
+            display_process_status("RESEARCH", f"Searching DuckDuckGo for '{duckduckgo_search_term}'", {})
+            
+            try:
+                # Use the provided browser instance if available, otherwise create one
+                if browser:
+                    # Browser is already set up, use it directly
+                    duckduckgo_results = web_scraper.search_duckduckgo(
+                        browser,
+                        duckduckgo_search_term,
+                        settings=search_settings
+                    )
+                else:
+                    # Create a new browser instance (this is the fallback case)
+                    with web_scraper.setup_browser(headless=not args.interactive, browser_type="duckduckgo") as temp_browser:
+                        duckduckgo_results = web_scraper.search_duckduckgo(
+                            temp_browser,
+                            duckduckgo_search_term,
+                            settings=search_settings
+                        )
+                
+                if duckduckgo_results:
+                    logger.info(f"Found {len(duckduckgo_results)} results from DuckDuckGo")
+                    results.extend(duckduckgo_results)
+                    display_process_status("RESULTS FOUND", 
+                                          f"Found {len(duckduckgo_results)} results from DuckDuckGo")
+                else:
+                    logger.warning("No results found from DuckDuckGo")
+                    display_process_status("NO RESULTS", 
+                                          f"No results found from DuckDuckGo", {})
+                    failed_engines.append("DuckDuckGo")
+            except Exception as e:
+                logger.error(f"Error searching DuckDuckGo: {e}")
+                failed_engines.append("DuckDuckGo")
+                
+        # Continue with searching other engines as needed...
+        
+        # Process and save the results
+        if results:
+            # Process and save results
+            pass
+        else:
+            logger.warning(f"No results found for '{search_term}' across any search engines")
+            display_process_status("NO RESULTS", 
+                                  f"No search results found for '{subtopic}' - check for CAPTCHA challenges in the browser window", {
+                "failed_engines": failed_engines
+            })
+
 def main(demo_mode=False, settings=None):
-    """Main function to run the academic research assistant."""
+    """
+    Main function to run the academic research assistant.
+    
+    Args:
+        demo_mode (bool): Whether to run in demo mode with mocked API calls
+        settings (dict): Settings for the search and analysis
+    """
     # Load environment variables
     load_dotenv()
     
+    # If settings is None, initialize it
     if settings is None:
         settings = {}
     
-    # Default settings
-    if 'headless' not in settings:
-        settings['headless'] = False  # Default to non-headless mode
-    
-    # Check for API key if not in demo mode
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not demo_mode and (not api_key or api_key == "your_api_key_here"):
-        logger.warning("Valid Google API key not found. Running in demo mode.")
-        demo_mode = True
-    
     try:
-        # Step 1: Get problem statement from user
-        logger.info("Getting problem statement from user")
+        # Step 1: Get the problem statement from the user
         problem_statement = get_problem_statement()
-        if not problem_statement:
-            logger.warning("No problem statement provided")
-            return
+        display_process_status("INITIALIZATION", f"Problem Statement: {problem_statement}")
         
-        display_process_status("PROBLEM STATEMENT", 
-                              f"Received problem statement: {problem_statement}")
-        
-        # Store problem statement in settings for later use
-        settings["problem_statement"] = problem_statement
-        
-        # Initialize the final document that will collect all research findings
-        try:
-            from text_compiler import update_final_document
-            update_final_document(problem_statement, is_initialization=True)
-            display_process_status("FINAL DOCUMENT", 
-                                 "Initialized final document that will collect all research findings", 
-                                 {"location": "research_results/final.md"})
-            logger.info("Initialized final document at research_results/final.md")
-        except Exception as e:
-            logger.error(f"Error initializing final document: {str(e)}")
-            display_process_status("WARNING", 
-                                 "Could not initialize final document", 
-                                 {"error": str(e)})
-        
-        # Step 2: Generate topics and subtopics
-        logger.info("Generating topics and subtopics")
+        # Step 2: Generate topics and subtopics from the problem statement
         if demo_mode:
             topics_subtopics = generate_demo_topics(problem_statement)
         else:
             topics_subtopics = generate_topics_subtopics(problem_statement)
         
-        display_process_status("TOPICS GENERATED", 
-                              f"Generated {len(topics_subtopics)} topics for research", 
-                              topics_subtopics)
+        # Print the topics in a more readable format with divider lines
+        print("\n" + "-" * 85)
+        print("[TOPIC GENERATION] Generated the following topics and subtopics:")
+        for i, topic in enumerate(topics_subtopics, 1):
+            topic_name = topic.get('topic', 'Unknown Topic')
+            subtopics = topic.get('subtopics', [])
+            print(f"  {i}. {topic_name}")
+            # Print a few subtopics (up to 3) with ellipsis if there are more
+            if subtopics:
+                subtopics_preview = ", ".join(subtopics[:3])
+                if len(subtopics) > 3:
+                    subtopics_preview += f", ... ({len(subtopics) - 3} more)"
+                print(f"     → {subtopics_preview}")
+        print("-" * 85 + "\n")
         
-        # Step 3: Execute sequential research workflow
-        logger.info("Starting sequential research workflow")
+        # New Step: Generate research roadmap before starting research
+        roadmap = generate_research_roadmap(problem_statement, topics_subtopics)
+        roadmap_path = save_roadmap(roadmap, problem_statement)
+        display_process_status("ROADMAP GENERATION", f"Generated research roadmap and saved to {roadmap_path}")
+        print("\n\n" + "="*80)
+        print("RESEARCH ROADMAP GENERATED")
+        print("="*80)
+        print("A detailed roadmap for your research has been created.")
+        print(f"You can view it at: {roadmap_path}")
+        print("This roadmap outlines the research approach, methodology, and timeline.")
+        print("="*80 + "\n\n")
+        
+        # Step 3: Search for relevant papers for each topic
         if demo_mode:
             search_results = generate_demo_search_results(topics_subtopics)
-            analyzed_content, new_topics = generate_demo_analyzed_content(search_results)
+            # Give a feeling of processing time even in demo mode
+            time.sleep(2)
             
-            display_process_status("DEMO RESEARCH COMPLETE", 
-                                  "Completed demo research workflow", 
-                                  {"search_results_count": len(search_results)})
+            # In demo mode, we need to generate analyzed content
+            analyzed_content, _ = generate_demo_analyzed_content(search_results)
         else:
-            analyzed_content = sequential_research_workflow(topics_subtopics, settings)
-            # Extract new topics after all research is done
-            all_papers = []
-            for results in analyzed_content.values():
-                all_papers.extend(results)
-            new_topics = content_analyzer.identify_new_topics(all_papers, topics_subtopics)
-            
-            display_process_status("RESEARCH COMPLETE", 
-                                  "Completed primary research workflow", 
-                                  {"analyzed_content_count": len(analyzed_content), "new_topics_count": len(new_topics)})
+            # Launch the browser one time and reuse for all searches
+            with web_scraper.setup_browser(headless=settings.get('headless', True), browser_type=settings.get('browser_type')) as browser:
+                analyzed_content = sequential_research_workflow(topics_subtopics, settings)
         
         # Step 4: Research any new topics if they were discovered
-        if new_topics:
-            logger.info(f"Found {len(new_topics)} new topics, processing additional literature")
-            display_process_status("NEW TOPICS FOUND", 
-                                  f"Found {len(new_topics)} new topics for additional research", 
-                                  new_topics)
-                                  
-            if demo_mode:
-                additional_results = generate_demo_search_results(new_topics)
-                additional_content, _ = generate_demo_analyzed_content(additional_results)
-                
-                display_process_status("ADDITIONAL RESEARCH COMPLETE", 
-                                      "Completed additional demo research", 
-                                      {"additional_results_count": len(additional_results)})
-            else:
-                additional_content = sequential_research_workflow(new_topics, settings)
-                
-                display_process_status("ADDITIONAL RESEARCH COMPLETE", 
-                                      "Completed additional research workflow", 
-                                      {"additional_content_count": len(additional_content)})
-            
+        if demo_mode:
+            additional_results = generate_demo_search_results(topics_subtopics)
+            additional_content, _ = generate_demo_analyzed_content(additional_results)
             analyzed_content.update(additional_content)
+        else:
+            new_topics = content_analyzer.identify_new_topics(analyzed_content, topics_subtopics)
+            if new_topics:
+                logger.info(f"Found {len(new_topics)} new topics, processing additional literature")
+                display_process_status("NEW TOPICS FOUND", 
+                                      f"Found {len(new_topics)} new topics for additional research", 
+                                      new_topics)
+                additional_content = sequential_research_workflow(new_topics, settings)
+                analyzed_content.update(additional_content)
         
         # Step 5: Compile the paper
         logger.info("Compiling final paper")
         display_process_status("PAPER COMPILATION STARTED", 
                               "Beginning to compile final paper")
-                              
         final_paper = compile_paper(problem_statement, topics_subtopics, analyzed_content)
         
         # Step 6: Display the final paper
         display_final_paper(final_paper)
         
+        # Step 7: Ensure references are properly formatted in all generated files
+        try:
+            display_process_status("REFERENCE FORMATTING", 
+                                 "Checking all research documents for proper reference formatting")
+            
+            # Initialize reference manager
+            ref_manager = ReferenceManager()
+            
+            # Update all documents in the project
+            update_results = ref_manager.update_all_documents()
+            
+            if update_results:
+                display_process_status("REFERENCE FORMATTING COMPLETE", 
+                                     f"Updated references in {len(update_results)} documents", 
+                                     update_results)
+        except Exception as e:
+            logger.warning(f"Error updating references: {e}", exc_info=True)
+            display_process_status("REFERENCE FORMATTING WARNING", 
+                                 f"Could not update references: {str(e)}")
+        
         logger.info("Academic Research Assistant completed successfully")
         display_process_status("PROCESS COMPLETE", 
                               "Academic Research Assistant completed successfully", 
                               {"paper_length": len(final_paper)})
-                              
+        
         return final_paper
         
     except Exception as e:
@@ -889,7 +1071,7 @@ def display_final_paper(paper):
     """
     print("\n" + "="*80)
     print("ACADEMIC RESEARCH ASSISTANT - FINAL PAPER")
-    print("="*80 + "\n")
+    print("="*80)
     
     # Display paper
     print(paper)
@@ -913,12 +1095,159 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Academic Research Assistant')
     parser.add_argument('--demo', action='store_true', help='Run in demo mode without external dependencies')
     parser.add_argument('--headless', action='store_true', help='Run browser in headless mode (invisible)')
+    parser.add_argument('--real', action='store_true', help='Force real search mode with visible browser for CAPTCHA solving')
+    
+    # Search engine selection options
+    parser.add_argument('--all-engines', action='store_true', help='Use all available search engines')
+    parser.add_argument('--google-scholar', action='store_true', help='Use Google Scholar search engine')
+    parser.add_argument('--semantic-scholar', action='store_true', help='Use Semantic Scholar search engine')
+    parser.add_argument('--arxiv', action='store_true', help='Use arXiv search engine')
+    parser.add_argument('--pubmed', action='store_true', help='Use PubMed search engine')
+    parser.add_argument('--ieee', action='store_true', help='Use IEEE Xplore search engine')
+    parser.add_argument('--research-gate', action='store_true', help='Use ResearchGate search engine')
+    parser.add_argument('--duckduckgo', action='store_true', help='Use DuckDuckGo search engine (prioritizes PDF results)')
+    
     args = parser.parse_args()
+    
+    # If --real is specified, override both demo and headless modes
+    if args.real:
+        demo_mode = False
+        headless_mode = False
+    else:
+        demo_mode = args.demo
+        headless_mode = args.headless
     
     # Configure settings that will be passed to modules
     settings = {
-        'headless': args.headless  # Use headless mode if flag is provided
+        'headless': headless_mode,  # Use headless mode if flag is provided and --real is not
+        'captcha_wait_time': 120,  # Give user 2 minutes to solve CAPTCHAs
     }
     
+    # Configure search engines to use
+    search_engines = []
+    
+    # If DuckDuckGo is specified, set it as the exclusive search engine
+    if args.duckduckgo:
+        logger.info("Using DuckDuckGo as search engine")
+        browser_type = 'duckduckgo'
+        
+        # Configure settings
+        search_settings = {
+            'prioritize_pdf': True,
+            'max_results': 10,
+        }
+        
+        # Step 1: Get the problem statement from the user
+        problem_statement = get_problem_statement()
+        display_process_status("INITIALIZATION", f"Problem Statement: {problem_statement}")
+        
+        # Step 2: Generate topics and subtopics from the problem statement
+        if demo_mode:
+            topics_subtopics = generate_demo_topics(problem_statement)
+        else:
+            topics_subtopics = generate_topics_subtopics(problem_statement)
+        
+        # Print the topics in a more readable format with divider lines
+        print("\n" + "-" * 85)
+        print("[TOPIC GENERATION] Generated the following topics and subtopics:")
+        for i, topic in enumerate(topics_subtopics, 1):
+            topic_name = topic.get('topic', 'Unknown Topic')
+            subtopics = topic.get('subtopics', [])
+            print(f"  {i}. {topic_name}")
+            # Print a few subtopics (up to 3) with ellipsis if there are more
+            if subtopics:
+                subtopics_preview = ", ".join(subtopics[:3])
+                if len(subtopics) > 3:
+                    subtopics_preview += f", ... ({len(subtopics) - 3} more)"
+                print(f"     → {subtopics_preview}")
+        print("-" * 85 + "\n")
+        
+        browser = web_scraper.setup_browser(headless=not args.real, browser_type=browser_type)
+        
+        # Use a context manager for the browser
+        with browser as browser_instance:
+            for topic_data in topics_subtopics:
+                process_topic_with_subtopics(
+                    topic_data, 
+                    args, 
+                    browser_instance, 
+                    search_engines=['duckduckgo'], 
+                    search_settings=search_settings
+                )
+        search_engines.append("DuckDuckGo")
+        settings['duckduckgo_only'] = True
+        settings['pdf_priority'] = True  # Enable PDF prioritization
+        settings['browser_type'] = 'duckduckgo'  # Use DuckDuckGo browser configuration
+        settings['user_agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.3'  # Set a custom user agent
+        settings['window_size'] = (1920, 1080)  # Set the window size for the browser
+        settings['proxy'] = 'socks5://localhost:9050'  # Set a proxy for the browser
+        settings['disable_images'] = True  # Disable images to improve performance
+        settings['disable_js'] = False  # Enable JavaScript to improve functionality
+        settings['incognito'] = True  # Enable incognito mode to improve privacy
+        settings['disable_gpu'] = True  # Disable GPU acceleration to improve performance
+        settings['no_sandbox'] = True  # Disable sandboxing to improve performance
+        settings['disable_dev_shm_usage'] = True  # Disable shared memory usage to improve performance
+    else:
+        # If specific engines are selected, use only those
+        specific_engines_selected = (
+            args.google_scholar or args.semantic_scholar or args.arxiv or 
+            args.pubmed or args.ieee or args.research_gate
+        )
+        
+        if args.all_engines or not specific_engines_selected:
+            # Use all engines if --all-engines is specified or no specific engines are selected
+            search_engines = [
+                "Google Scholar", "Semantic Scholar", "arXiv", 
+                "PubMed", "IEEE Xplore", "ResearchGate", "DuckDuckGo"
+            ]
+        else:
+            # Add only selected engines
+            if args.google_scholar:
+                search_engines.append("Google Scholar")
+            if args.semantic_scholar:
+                search_engines.append("Semantic Scholar")
+            if args.arxiv:
+                search_engines.append("arXiv")
+            if args.pubmed:
+                search_engines.append("PubMed")
+            if args.ieee:
+                search_engines.append("IEEE Xplore")
+            if args.research_gate:
+                search_engines.append("ResearchGate")
+    
+    settings['search_engines'] = search_engines
+    
+    print("\n" + "="*80)
+    if demo_mode:
+        print("RUNNING IN DEMO MODE: Using mock data instead of actual research")
+    else:
+        print("RUNNING IN REAL MODE: Performing actual web searches")
+        if not headless_mode:
+            print("Browser will be visible to allow solving CAPTCHAs if they appear")
+            print("If a CAPTCHA appears, please solve it in the browser window that opens")
+    print("\nUsing search engines:")
+    for engine in search_engines:
+        print(f"- {engine}")
+    print("="*80 + "\n")
+    
     # Pass settings to main function
-    main(demo_mode=args.demo, settings=settings)
+    main(demo_mode=demo_mode, settings=settings)
+
+def save_roadmap(roadmap_content, problem_statement):
+    """
+    Save roadmap content to a file
+    
+    Args:
+        roadmap_content (str): Roadmap content to save
+        problem_statement (str): Problem statement for filename generation
+        
+    Returns:
+        str: Path to saved roadmap file
+    """
+    # Save directly to roadmap.md in the main directory
+    filename = 'roadmap.md'
+    
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(roadmap_content)
+    
+    return filename

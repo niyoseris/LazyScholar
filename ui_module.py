@@ -2,15 +2,25 @@
 UI Module - Handles user interface elements for the academic research assistant.
 """
 
+import os
+import logging
+import sys
+
+logger = logging.getLogger(__name__)
+
+def is_interactive():
+    """Check if the script is running in an interactive mode."""
+    return os.isatty(sys.stdin.fileno())
+
 def get_problem_statement():
     """
-    Get the problem statement from the user.
+    Get the research problem statement from the user.
     
     Returns:
-        str: The problem statement entered by the user.
+        str: The validated problem statement
     """
     print("\n" + "="*80)
-    print(" "*30 + "ACADEMIC RESEARCH ASSISTANT")
+    print(" " * 30 + "ACADEMIC RESEARCH ASSISTANT")
     print("="*80 + "\n")
     
     print("Welcome to the Academic Research Assistant!")
@@ -22,23 +32,36 @@ def get_problem_statement():
     print("Example: 'What are the effects of climate change on marine biodiversity?'\n")
     
     while True:
-        problem_statement = input("Enter your problem statement: ").strip()
-        
-        if not problem_statement:
-            print("Problem statement cannot be empty. Please try again.")
-            continue
+        try:
+            print("Enter your problem statement: ", end="")
+            problem_statement = sys.stdin.readline().strip()
             
-        if len(problem_statement) < 10:
-            print("Problem statement seems too short. Please provide more details.")
-            continue
-            
-        confirm = input(f"\nYou entered: \"{problem_statement}\"\nIs this correct? (y/n): ").lower()
-        
-        if confirm == 'y':
-            break
-    
-    print("\nThank you! Processing your request. This may take several minutes...")
-    return problem_statement
+            # Handle non-interactive mode (stdin is being piped)
+            if not is_interactive():
+                print(f"\nYou entered: \"{problem_statement}\"")
+                print("Auto-confirming in non-interactive mode.")
+                return problem_statement
+                
+            if not problem_statement:
+                print("Problem statement cannot be empty. Please try again.")
+                continue
+                
+            confirm = input(f"\nYou entered: \"{problem_statement}\"\nIs this correct? (y/n): ").lower()
+            if confirm in ["y", "yes"]:
+                return problem_statement
+                
+        except EOFError:
+            # Handle EOF error (e.g., when input is piped)
+            if problem_statement:
+                print(f"\nProcessing input: \"{problem_statement}\"")
+                return problem_statement
+            else:
+                print("\nNo input detected. Using default problem statement.")
+                return "What are the effects of climate change on marine biodiversity?"
+                
+        except KeyboardInterrupt:
+            print("\nOperation cancelled by user.")
+            raise SystemExit(0)
 
 def display_final_paper(paper_content, references):
     """
