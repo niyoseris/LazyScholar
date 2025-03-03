@@ -178,6 +178,127 @@ def analyze_screenshot(screenshot_path: str, prompt: str) -> Dict[str, Any]:
             "results": []
         }
 
+def analyze_screenshot_for_pdf_links(screenshot_path: str) -> Dict[str, Any]:
+    """
+    Analyze a screenshot to find PDF links or download buttons.
+    
+    Args:
+        screenshot_path: Path to the screenshot
+        
+    Returns:
+        Dictionary with information about PDF links found
+    """
+    prompt = """
+    Analyze this webpage screenshot and find links to PDF files. 
+    Look for download buttons, PDF icons, or links containing "PDF", "Download", "Full text", etc.
+    If you find any, provide the following information:
+    1. Text of the link or button
+    2. Approximate position on the page (coordinates or description)
+    3. Whether it appears to be a direct PDF link
+    
+    Format your response as a JSON object with fields: found (boolean), 
+    pdf_links (array of objects with text, position, and is_direct_pdf fields).
+    """
+    
+    return analyze_screenshot(screenshot_path, prompt)
+
+def find_pdf_links(browser: webdriver.Chrome) -> List[Dict[str, Any]]:
+    """
+    Find PDF links on the current page using vision AI and traditional methods.
+    
+    Args:
+        browser: Selenium WebDriver instance
+        
+    Returns:
+        List of dictionaries with information about PDF links
+    """
+    pdf_links = []
+    
+    # Take a screenshot of the page
+    screenshot_path = take_screenshot(browser, "pdf_links")
+    
+    # Analyze the screenshot with Gemini Vision
+    vision_result = analyze_screenshot_for_pdf_links(screenshot_path)
+    
+    # Extract PDF links from vision analysis
+    if vision_result and vision_result.get("found", False) and "pdf_links" in vision_result:
+        for link_info in vision_result.get("pdf_links", []):
+            # Try to find the element by text
+            if "text" in link_info and link_info["text"]:
+                try:
+                    # Use JavaScript to find elements by text content
+                    script = """
+                    function findElementsByText(text) {
+                        const elements = Array.from(document.querySelectorAll('a, button, [role="button"]'));
+                        return elements.filter(element => 
+                            element.textContent.trim().toLowerCase().includes(text.toLowerCase())
+                        ).map(element => {
+                            const rect = element.getBoundingClientRect();
+                            return {
+                                text: element.textContent.trim(),
+                                href: element.href || null,
+                                tag: element.tagName.toLowerCase(),
+                                position: {
+                                    x: rect.x,
+                                    y: rect.y,
+                                    width: rect.width,
+                                    height: rect.height
+                                }
+                            };
+                        });
+                    }
+                    return findElementsByText(arguments[0]);
+                    """
+                    
+                    elements_info = browser.execute_script(script, link_info["text"])
+                    
+                    for element_info in elements_info:
+                        pdf_links.append({
+                            "text": element_info["text"],
+                            "href": element_info["href"],
+                            "tag": element_info["tag"],
+                            "position": element_info["position"],
+                            "is_direct_pdf": element_info["href"] and element_info["href"].lower().endswith(".pdf") if element_info["href"] else False,
+                            "source": "vision"
+                        })
+                except Exception as e:
+                    logger.error(f"Error finding PDF link by text: {e}")
+    
+    # Also try traditional methods to find PDF links
+    try:
+        # Find links that likely point to PDFs
+        pdf_patterns = [
+            "a[href$='.pdf']",
+            "a[href*='pdf']",
+            "a[href*='download']",
+            "a[href*='view']",
+            "a[download]"
+        ]
+        
+        for pattern in pdf_patterns:
+            try:
+                elements = browser.find_elements(By.CSS_SELECTOR, pattern)
+                for element in elements:
+                    if element.is_displayed():
+                        href = element.get_attribute("href")
+                        text = element.text.strip() or element.get_attribute("title") or "PDF Link"
+                        
+                        # Check if this link is already in our list
+                        if not any(link["href"] == href for link in pdf_links if "href" in link and link["href"]):
+                            pdf_links.append({
+                                "text": text,
+                                "href": href,
+                                "tag": element.tag_name,
+                                "is_direct_pdf": href and href.lower().endswith(".pdf") if href else False,
+                                "source": "traditional"
+                            })
+            except Exception as e:
+                logger.error(f"Error finding PDF links with pattern {pattern}: {e}")
+    except Exception as e:
+        logger.error(f"Error in traditional PDF link finding: {e}")
+    
+    return pdf_links
+
 def find_search_input(browser: webdriver.Chrome) -> Optional[webdriver.remote.webelement.WebElement]:
     """
     Find the search input field on the page using vision AI.

@@ -11,6 +11,8 @@ LazyScholar is an AI-powered research assistant that helps users conduct academi
 - **Content Extraction**: Extracts relevant information from research papers
 - **Paper Generation**: Compiles findings into a structured academic paper with proper citations
 - **Organized Output**: Saves research findings in a structured directory format
+- **Specialized Templates**: Includes pre-defined templates for various research domains
+- **Dry Run Mode**: Test initialization and analysis without performing full research
 
 ## How It Works
 
@@ -32,6 +34,8 @@ LazyScholar is an AI-powered research assistant that helps users conduct academi
    ```
    GOOGLE_API_KEY=your_api_key_here
    ```
+   
+   You can obtain a Google API key from [Google AI Studio](https://makersuite.google.com/app/apikey).
 
 ## Usage
 
@@ -46,12 +50,29 @@ python lazy_scholar.py "Your research problem statement here"
 - `--search-engine`: Specify a different search engine URL (default: https://scholar.google.com)
 - `--headless`: Run browser in headless mode
 - `--output-dir`: Specify output directory (default: research_output)
+- `--dry-run`: Test initialization and analysis without performing full research
+- `--timeout`: Set browser operation timeout in seconds (default: 120)
+- `--max-pdfs`: Maximum number of PDFs to download per topic (default: 10)
 
 Example:
 
 ```bash
-python lazy_scholar.py "The impact of climate change on marine ecosystems" --output-dir climate_research
+python lazy_scholar.py "The impact of climate change on marine ecosystems" --output-dir climate_research --dry-run
 ```
+
+## Specialized Research Templates
+
+LazyScholar includes specialized templates for various research domains:
+
+1. **Music and Politics**: For research on music's relationship with political views and movements
+2. **AI and Education**: For research on artificial intelligence in educational contexts
+3. **Technology and Society**: For research on digital transformation and social impacts
+4. **Health and Medicine**: For research on medical innovations and healthcare systems
+5. **Environment and Sustainability**: For research on climate change and conservation
+6. **Business and Economics**: For research on economic theories and business strategies
+7. **Psychology and Human Behavior**: For research on cognitive processes and mental health
+
+These templates are automatically selected based on keywords in your research problem statement.
 
 ## Output Structure
 
@@ -83,6 +104,7 @@ research_output/
 - May trigger CAPTCHAs on academic search engines
 - PDF extraction quality depends on the PDF structure
 - Limited to 10 PDFs per topic to avoid excessive processing
+- Without a valid API key, only default templates will be used
 
 ## License
 
