@@ -136,51 +136,78 @@ def extract_references_from_final_paper(final_paper_path):
         with open(final_paper_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # Get the PDF directory
-        pdf_dir = os.path.join(os.path.dirname(os.path.dirname(final_paper_path)), "pdfs")
+        # Get the PDF directory - check multiple possible locations
+        possible_pdf_dirs = [
+            os.path.join(os.path.dirname(os.path.dirname(final_paper_path)), "pdfs"),
+            os.path.join(os.path.dirname(final_paper_path), "pdfs"),
+            os.path.join(os.path.dirname(final_paper_path), "..", "pdfs")
+        ]
         
-        # Get all PDF files in the directory
         pdf_files = []
-        if os.path.exists(pdf_dir):
-            pdf_files = [os.path.join(pdf_dir, f) for f in os.listdir(pdf_dir) if f.endswith('.pdf')]
+        for pdf_dir in possible_pdf_dirs:
+            if os.path.exists(pdf_dir):
+                pdf_files.extend([os.path.join(pdf_dir, f) for f in os.listdir(pdf_dir) if f.endswith('.pdf')])
+                logger.info(f"Found {len(pdf_files)} PDF files in {pdf_dir}")
+                break
+        
+        # If no PDFs found in standard directories, search for PDF mentions in the content
+        if not pdf_files:
+            pdf_pattern = re.compile(r'([^\/\s]+\.pdf)')
+            pdf_mentions = set()
+            for match in pdf_pattern.finditer(content):
+                pdf_mentions.add(match.group(1))
+            
+            if pdf_mentions:
+                logger.info(f"Found {len(pdf_mentions)} PDF mentions in the paper")
+                # Try to locate these PDFs
+                for pdf_dir in possible_pdf_dirs:
+                    if os.path.exists(pdf_dir):
+                        for pdf_file in pdf_mentions:
+                            pdf_path = os.path.join(pdf_dir, pdf_file)
+                            if os.path.exists(pdf_path) and pdf_path not in pdf_files:
+                                pdf_files.append(pdf_path)
         
         # Extract references section
+        references = []
         references_match = re.search(r'## References\s*\n(.*?)(?:\n#|\Z)', content, re.DOTALL)
         if references_match:
             references_section = references_match.group(1).strip()
             
-            # Extract individual references
-            references = []
-            # Pattern for numbered references
-            ref_pattern = re.compile(r'(?:^|\n)(?:\d+\.\s+)?(.*?)(?=\n\d+\.|$)', re.DOTALL)
-            for match in ref_pattern.finditer(references_section):
-                ref = match.group(1).strip()
-                if ref and not ref.startswith("No references"):
-                    references.append(ref)
+            # Extract individual references with various patterns
+            ref_patterns = [
+                # Numbered references
+                re.compile(r'(?:^|\n)(?:\d+\.\s+)?(.*?)(?=\n\d+\.|$)', re.DOTALL),
+                # Topic-subtopic references
+                re.compile(r'\*\*.*?\*\*:\s*(.*?)(?=\n\*\*|\Z)', re.DOTALL)
+            ]
+            
+            for pattern in ref_patterns:
+                for match in pattern.finditer(references_section):
+                    ref_text = match.group(1).strip()
+                    if ref_text and not ref_text.startswith("No references"):
+                        # Split multi-line references
+                        for ref in ref_text.split('\n'):
+                            ref = ref.strip()
+                            if ref:
+                                references.append(ref)
             
             logger.info(f"Extracted {len(references)} references from the paper")
-            
-            # Try to match references to PDF files
-            matched_pdfs = []
-            for pdf_path in pdf_files:
-                pdf_name = os.path.basename(pdf_path)
-                # Check if PDF filename appears in any reference
-                for ref in references:
-                    if pdf_name.lower() in ref.lower():
-                        matched_pdfs.append(pdf_path)
-                        break
-            
-            # If we couldn't match PDFs by name, include all PDFs
-            if not matched_pdfs and pdf_files:
-                matched_pdfs = pdf_files
-                logger.info(f"Using all {len(matched_pdfs)} available PDFs for citation generation")
-            else:
-                logger.info(f"Matched {len(matched_pdfs)} PDFs to references")
-            
-            return matched_pdfs, content
-        else:
-            logger.warning("No References section found in the paper")
-            return pdf_files, content
+        
+        # Extract in-text citations
+        citation_patterns = [
+            re.compile(r'\(([^)]+?, \d{4}[a-z]?)\)'),  # APA style (Author, Year)
+            re.compile(r'([A-Z][a-z]+ et al\., \d{4})'),  # Author et al., Year
+        ]
+        
+        citations = set()
+        for pattern in citation_patterns:
+            for match in pattern.finditer(content):
+                citation = match.group(1).strip()
+                citations.add(citation)
+        
+        logger.info(f"Found {len(citations)} in-text citations in the paper")
+        
+        return pdf_files, content
     except Exception as e:
         logger.error(f"Error extracting references: {str(e)}")
         return [], ""
@@ -194,139 +221,212 @@ def generate_academic_citations(pdf_paths):
             metadata = extract_metadata_from_pdf(pdf_path)
             
             # Format authors
-            authors = metadata.get('authors', 'Unknown')
-            if ',' in authors:
-                # Multiple authors separated by commas
-                author_text = authors
-            else:
-                # Single author or authors not properly formatted
-                author_text = authors
+            authors = metadata.get('authors', '')
+            if not authors or authors == "Unknown":
+                # Try to extract author from filename
+                base_name = os.path.basename(pdf_path).replace('.pdf', '')
+                parts = base_name.split('_')
+                if len(parts) > 1:
+                    authors = parts[0].replace('-', ' ').title()
+                else:
+                    authors = "Unknown Author"
+            
+            # Clean up authors
+            authors = re.sub(r'[_\-]', ' ', authors)
             
             # Format title
-            title = metadata.get('title', os.path.basename(pdf_path).replace('.pdf', ''))
+            title = metadata.get('title', '')
+            if not title or len(title) < 5:
+                # Use filename as title
+                base_name = os.path.basename(pdf_path).replace('.pdf', '')
+                parts = base_name.split('_')
+                if len(parts) > 1:
+                    title = ' '.join(parts[1:]).replace('-', ' ').title()
+                else:
+                    title = base_name.replace('-', ' ').title()
+            
+            # Clean up title
+            title = re.sub(r'[_\-]', ' ', title)
             
             # Format year
-            year = metadata.get('year', 'n.d.')
+            year = metadata.get('year', '')
+            if not year or year == "n.d.":
+                # Try to extract year from filename or title
+                year_pattern = re.compile(r'(19|20)\d{2}')
+                year_match = year_pattern.search(os.path.basename(pdf_path))
+                if year_match:
+                    year = year_match.group(0)
+                elif year_pattern.search(title):
+                    year = year_pattern.search(title).group(0)
+                else:
+                    year = "n.d."
             
             # Create citation in APA format
-            citation = f"{author_text} ({year}). {title}."
+            if ',' in authors:
+                # Multiple authors
+                citation = f"{authors} ({year}). {title}."
+            else:
+                # Single author
+                citation = f"{authors} ({year}). {title}."
             
             citations.append(citation)
         except Exception as e:
             logger.error(f"Error generating citation for {pdf_path}: {str(e)}")
             # Create a basic citation from the filename
             base_name = os.path.basename(pdf_path).replace('.pdf', '')
-            citations.append(f"{base_name}. (n.d.).")
+            parts = base_name.split('_')
+            if len(parts) > 1:
+                author = parts[0].replace('-', ' ').title()
+                title = ' '.join(parts[1:]).replace('-', ' ').title()
+                citations.append(f"{author} (n.d.). {title}.")
+            else:
+                citations.append(f"{base_name.replace('-', ' ').title()} (n.d.).")
     
     return citations
 
 def format_as_academic_paper(model, content, pdf_paths):
     """Format the content as an academic paper with in-text citations."""
     try:
-        # Extract existing structure and content
+        # Step 1: Parse the original paper structure
         sections = {}
-        current_section = "preamble"
-        sections[current_section] = []
+        current_section = None
+        section_content = []
+        title = None
         
-        # Parse the original content to preserve structure
+        # Extract title and sections
         for line in content.split('\n'):
             if line.startswith('# '):
-                # Main title
-                sections["title"] = line[2:].strip()
+                title = line[2:].strip()
             elif line.startswith('## '):
-                # Section heading
-                current_section = line[3:].strip().lower()
-                sections[current_section] = []
-            elif line.startswith('### '):
-                # Subsection - add to current section with formatting
-                sections[current_section].append(line)
-            else:
-                # Regular content
-                if current_section in sections:
-                    sections[current_section].append(line)
+                # Save previous section if any
+                if current_section:
+                    sections[current_section] = section_content
+                
+                # Start new section
+                current_section = line[3:].strip()
+                section_content = []
+            elif current_section:
+                section_content.append(line)
         
-        # Extract existing references
+        # Save the last section
+        if current_section and section_content:
+            sections[current_section] = section_content
+        
+        # Step 2: Extract existing references
         references = []
-        if "references" in sections:
-            ref_content = '\n'.join(sections["references"])
-            # Extract numbered references
-            ref_pattern = re.compile(r'(?:^|\n)(?:\d+\.\s+)?(.*?)(?=\n\d+\.|$)', re.DOTALL)
-            for match in ref_pattern.finditer(ref_content):
-                ref = match.group(1).strip()
-                if ref and not ref.startswith("No references"):
-                    references.append(ref)
+        if "References" in sections:
+            ref_content = '\n'.join(sections["References"])
+            # Extract references with various patterns
+            ref_patterns = [
+                # Numbered references
+                re.compile(r'(?:^|\n)(?:\d+\.\s+)?(.*?)(?=\n\d+\.|$)', re.DOTALL),
+                # Topic-subtopic references
+                re.compile(r'\*\*.*?\*\*:\s*(.*?)(?=\n\*\*|\Z)', re.DOTALL)
+            ]
+            
+            for pattern in ref_patterns:
+                for match in pattern.finditer(ref_content):
+                    ref_text = match.group(1).strip()
+                    if ref_text and not ref_text.startswith("No references"):
+                        # Split multi-line references
+                        for ref in ref_text.split('\n'):
+                            ref = ref.strip()
+                            if ref and len(ref) > 5:  # Minimal length check
+                                references.append(ref)
         
-        # Add citations from PDF metadata if available
-        pdf_citations = generate_academic_citations(pdf_paths)
+        # Step 3: Extract citations from PDF metadata
+        pdf_citations = []
+        for pdf_path in pdf_paths:
+            try:
+                metadata = extract_metadata_from_pdf(pdf_path)
+                
+                # Format authors
+                authors = metadata.get('authors', 'Unknown')
+                
+                # Format title
+                title_text = metadata.get('title', os.path.basename(pdf_path).replace('.pdf', ''))
+                
+                # Format year
+                year = metadata.get('year', 'n.d.')
+                
+                # Create citation in APA format
+                citation = f"{authors} ({year}). {title_text}."
+                pdf_citations.append(citation)
+            except Exception as e:
+                logger.warning(f"Error creating citation for {pdf_path}: {str(e)}")
         
-        # Combine all references, removing duplicates
+        # Step 4: Combine all references, removing duplicates
         all_references = []
         seen_refs = set()
         
-        # First add existing references from the paper
+        # Process existing references first
         for ref in references:
-            normalized = re.sub(r'^\**.*?\**:\s*', '', ref).strip()  # Remove topic/subtopic prefixes
-            if normalized and normalized not in seen_refs:
-                seen_refs.add(normalized)
-                all_references.append(ref)
-        
-        # Then add references from PDF metadata
-        for ref in pdf_citations:
-            normalized = ref.lower()
-            # Check if this reference is already included (approximate matching)
-            is_duplicate = False
-            for existing in seen_refs:
-                # Simple similarity check - if 70% of words match, consider it a duplicate
-                ref_words = set(normalized.split())
-                existing_words = set(existing.lower().split())
-                if len(ref_words) > 0 and len(existing_words) > 0:
-                    common_words = ref_words.intersection(existing_words)
-                    similarity = len(common_words) / min(len(ref_words), len(existing_words))
-                    if similarity > 0.7:
-                        is_duplicate = True
-                        break
+            # Clean up reference
+            ref = re.sub(r'^SOURCE \d+:\s*', '', ref)  # Remove SOURCE prefix
+            ref = re.sub(r'^\d+\.\s+', '', ref)  # Remove numbering
             
-            if not is_duplicate:
-                seen_refs.add(normalized)
-                all_references.append(ref)
+            # Skip if empty or too short
+            if not ref or len(ref) < 5:
+                continue
+                
+            # Check if it's a filename
+            if ref.lower().endswith('.pdf'):
+                # Try to find a better citation for this PDF
+                found_better = False
+                for pdf_citation in pdf_citations:
+                    if ref.lower() in pdf_citation.lower():
+                        if pdf_citation not in seen_refs:
+                            seen_refs.add(pdf_citation)
+                            all_references.append(pdf_citation)
+                            found_better = True
+                            break
+                
+                # If no better citation found, use as is
+                if not found_better and ref not in seen_refs:
+                    seen_refs.add(ref)
+                    all_references.append(ref)
+            else:
+                # Use the reference as is if not already included
+                if ref not in seen_refs:
+                    seen_refs.add(ref)
+                    all_references.append(ref)
         
-        # Extract title
-        title = sections.get("title", "Research Paper")
+        # Add remaining PDF citations
+        for citation in pdf_citations:
+            if citation not in seen_refs:
+                seen_refs.add(citation)
+                all_references.append(citation)
         
-        # Create a more flexible prompt for academic formatting
+        # Step 5: Create a better prompt for academic formatting
         prompt = f"""
-        Enhance the following research paper to meet academic standards while preserving its original content and structure.
+        Enhance the following research paper to meet academic standards while PRESERVING ALL ORIGINAL CONTENT.
         
-        Paper title: {title}
+        IMPORTANT INSTRUCTIONS:
+        1. DO NOT change the paper's structure or reorganize sections
+        2. DO NOT remove any content or findings from the original paper
+        3. DO NOT add new content that wasn't in the original paper
+        4. DO improve the academic tone and language
+        5. DO format in-text citations properly as (Author, Year)
+        6. DO ensure all citations have corresponding entries in the references list
+        7. DO maintain all technical details and specialized terminology
         
-        IMPORTANT GUIDELINES:
-        1. Preserve ALL original content and insights
-        2. Maintain the existing section structure where possible
-        3. Ensure all in-text citations use proper academic format (Author, Year)
-        4. Connect in-text citations to the references list
-        5. Improve language for clarity and academic tone
-        6. Format the paper in proper academic style
-        7. DO NOT invent new content or findings
-        8. DO NOT remove substantive content
-        
-        Original paper structure:
-        {json.dumps({k: len(v) for k, v in sections.items()}, indent=2)}
+        Original paper title: {title or "Research Paper"}
         
         Original content:
         {content}
         
-        References to include (in APA format):
+        References to include (format these properly in APA style):
         {json.dumps(all_references, indent=2)}
         
-        The output should be in Markdown format.
+        The output should be in Markdown format with the same structure as the original paper.
         """
         
-        # Generate the formatted paper
+        # Step 6: Generate the formatted paper
         response = model.generate_content(prompt)
         formatted_paper = response.text
         
-        # Ensure references are properly included
-        if "## References" not in formatted_paper:
+        # Step 7: Ensure references are properly included
+        if "## References" not in formatted_paper and all_references:
             formatted_paper += "\n\n## References\n\n"
             for i, ref in enumerate(all_references, 1):
                 formatted_paper += f"{i}. {ref}\n\n"
@@ -362,6 +462,12 @@ def parse_arguments():
         default="research_output/final_paper.md",
         help="Path to the input final paper (default: research_output/final_paper.md)"
     )
+    parser.add_argument(
+        "--preserve-structure",
+        action="store_true",
+        default=True,
+        help="Preserve the original paper structure (default: True)"
+    )
     return parser.parse_args()
 
 def main():
@@ -383,19 +489,53 @@ def main():
         logger.error(f"Final paper not found at {final_paper_path}")
         return
     
-    # Extract references and content
-    pdf_paths, content = extract_references_from_final_paper(final_paper_path)
-    
-    # Format as academic paper
-    formatted_paper = format_as_academic_paper(model, content, pdf_paths)
-    
-    # Save formatted paper
-    output_path = save_formatted_paper(final_paper_path, formatted_paper)
-    if output_path:
-        logger.info(f"Successfully created academic paper at {output_path}")
-        print(f"\nAcademic paper created at: {output_path}")
-    else:
-        logger.error("Failed to create academic paper")
+    try:
+        # Extract references and content
+        logger.info(f"Extracting references from {final_paper_path}")
+        pdf_paths, content = extract_references_from_final_paper(final_paper_path)
+        
+        if not content:
+            logger.error("Failed to read content from the paper")
+            return
+            
+        logger.info(f"Found {len(pdf_paths)} PDF files for citation generation")
+        
+        # Format as academic paper
+        logger.info("Formatting paper as academic document...")
+        formatted_paper = format_as_academic_paper(model, content, pdf_paths)
+        
+        # Validate the formatted paper
+        if not formatted_paper or len(formatted_paper) < 100:
+            logger.error("Formatting failed - output is too short or empty")
+            return
+            
+        # Save formatted paper
+        output_path = save_formatted_paper(final_paper_path, formatted_paper)
+        if output_path:
+            logger.info(f"Successfully created academic paper at {output_path}")
+            print(f"\nAcademic paper created at: {output_path}")
+            
+            # Provide a summary of changes
+            original_lines = len(content.split('\n'))
+            formatted_lines = len(formatted_paper.split('\n'))
+            print(f"\nSummary of changes:")
+            print(f"- Original paper: {original_lines} lines")
+            print(f"- Formatted paper: {formatted_lines} lines")
+            print(f"- References processed: {len(pdf_paths)}")
+            
+            # Check if references section exists
+            if "## References" in formatted_paper:
+                ref_section = formatted_paper.split("## References")[1]
+                ref_count = len(re.findall(r'\n\d+\.', ref_section))
+                print(f"- References included: {ref_count}")
+            else:
+                print("- Warning: No References section found in formatted paper")
+        else:
+            logger.error("Failed to create academic paper")
+    except Exception as e:
+        logger.error(f"Error in academic formatting process: {str(e)}", exc_info=True)
+        print(f"\nError: {str(e)}")
+        print("Please check the academic_formatter.log file for details.")
 
 if __name__ == "__main__":
     main() 

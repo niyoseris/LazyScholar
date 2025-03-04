@@ -5,26 +5,26 @@ This file tracks the generated topics and subtopics for your academic research p
 ## Current Research Status
 
 ### Research Topics
-- Political Views and Ideologies
-- Pop Music as a Cultural and Social Force
-- Correlation and Causation between Pop Music and Political Views
+- Aspartame Exposure During Pregnancy
+- Autism Spectrum Disorder (ASD) in Male Children
+- Association Between Aspartame and ASD
 
 ### Subtopics Status
 
-#### Political Views and Ideologies
-- [ ] {'title': 'Political Ideologies', 'status': 'pending'}
-- [ ] {'title': 'Political Polarization', 'status': 'pending'}
-- [ ] {'title': 'Political Activism', 'status': 'pending'}
+#### Aspartame Exposure During Pregnancy
+- [ ] {'title': 'Aspartame Metabolism Pregnancy', 'status': 'pending'}
+- [ ] {'title': 'Aspartame Dietary Intake Pregnancy', 'status': 'pending'}
+- [ ] {'title': 'Aspartame Placental Transfer', 'status': 'pending'}
 
-#### Pop Music as a Cultural and Social Force
-- [ ] {'title': 'Pop Music Influence', 'status': 'pending'}
-- [ ] {'title': 'Pop Music Lyrics', 'status': 'pending'}
-- [ ] {'title': 'Artist Activism', 'status': 'pending'}
+#### Autism Spectrum Disorder (ASD) in Male Children
+- [ ] {'title': 'ASD Diagnostic Criteria Boys', 'status': 'pending'}
+- [ ] {'title': 'ASD Prevalence Male Children', 'status': 'pending'}
+- [ ] {'title': 'ASD Etiology Genetic Factors', 'status': 'pending'}
 
-#### Correlation and Causation between Pop Music and Political Views
-- [ ] {'title': 'Music Preference Politics', 'status': 'pending'}
-- [ ] {'title': 'Genre Political Alignment', 'status': 'pending'}
-- [ ] {'title': 'Music Induced Political Change', 'status': 'pending'}
+#### Association Between Aspartame and ASD
+- [ ] {'title': 'Aspartame Autism Risk Studies', 'status': 'pending'}
+- [ ] {'title': 'Aspartame Neurodevelopmental Effects', 'status': 'pending'}
+- [ ] {'title': 'Aspartame Gut Microbiome Autism', 'status': 'pending'}
 
 ## Research Progress
 - Research initiated: 2025-03-04

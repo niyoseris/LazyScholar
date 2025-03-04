@@ -1365,7 +1365,7 @@ This file tracks the generated topics and subtopics for your academic research p
                     else:
                         # For non-PDF sources, just use the source name
                         f.write(f"{i}. SOURCE: {source_file}\n")
-            
+                
             logger.info(f"Wrote subtopic file: {file_path}")
             
         except Exception as e:
