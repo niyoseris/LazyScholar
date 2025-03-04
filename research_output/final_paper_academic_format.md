@@ -1,87 +1,109 @@
 ```markdown
-# Climate Change Impacts and Adaptation Strategies in Cyprus: A Comprehensive Review
+# Unveiling the Viticultural Heritage of Cyprus: A Comprehensive Study of Grape Varieties
 
 ## Abstract
 
-This research paper examines the multifaceted impacts of climate change on Cyprus, an island nation in the Eastern Mediterranean, recognized as a climate change "hotspot." The study synthesizes existing literature and reports to analyze the environmental, socioeconomic, and policy dimensions of climate change in Cyprus. Key environmental impacts include sea-level rise, exacerbating coastal erosion and threatening maritime boundaries; increasing water scarcity due to declining precipitation and rising temperatures; and the heightened frequency and intensity of extreme weather events. Socioeconomic consequences encompass the vulnerability of the tourism and agricultural sectors, as well as potential public health challenges. The paper also explores Cyprus's mitigation and adaptation strategies, focusing on renewable energy deployment, integrated water management, and climate policy frameworks. The findings underscore the urgent need for comprehensive and integrated climate action to safeguard Cyprus's environment, economy, and public health.
+This research paper explores grape varieties in Cyprus through a systematic analysis of their genetic diversity, agronomic and oenological characteristics, and conservation status. The study focuses on indigenous and lesser-known varieties, aiming to document their characteristics, distribution, and potential for contributing to the future of Cypriot winemaking. The research also examines the impact of climate change and the need for sustainable practices to preserve the island's viticultural heritage.
 
-**Keywords:** Climate Change, Cyprus, Sea-Level Rise, Water Scarcity, Tourism, Agriculture, Renewable Energy, Adaptation, Mitigation
+## Keywords
 
-## 1. Introduction
+Cyprus, grape varieties, indigenous grapes, viticulture, genetic diversity, wine quality, conservation, climate change
 
-Cyprus, an island state located in the Eastern Mediterranean, is particularly vulnerable to the impacts of climate change. Its geographical location places it within a region identified as a climate change "hotspot" by the Intergovernmental Panel on Climate Change (IPCC). This designation implies that Cyprus is projected to experience more pronounced effects of climate change compared to many other regions globally. These effects include rising temperatures, declining precipitation, increased frequency of extreme weather events, and sea-level rise. These changes pose significant challenges to the island's environment, economy, and public health. This research paper aims to provide a comprehensive overview of the climate change affects on Cyprus, examining the environmental and socioeconomic impacts, as well as the mitigation and adaptation strategies being implemented. By synthesizing existing research and reports, this study seeks to contribute to a better understanding of the challenges and opportunities facing Cyprus in the context of a changing climate.
+## Introduction
 
-## 2. Literature Review
+Cyprus, an island nation strategically positioned at the crossroads of Europe, Asia, and Africa, boasts a rich and complex history deeply intertwined with viticulture. Archaeological evidence suggests that winemaking on the island dates back over 6,000 years, making it one of the oldest wine-producing regions in the world. This enduring tradition has fostered a unique and diverse collection of grape varieties, many of which are indigenous and found nowhere else. These varieties represent a valuable genetic resource, reflecting the island's unique terroir and its long history of adaptation and cultivation.
 
-The existing literature highlights the vulnerability of Cyprus to climate change. Studies consistently point to the Eastern Mediterranean as a climate change hotspot, with projections indicating significant warming and drying trends (Zittis, Bruggeman, & Camera, 2021). Research has focused on specific impacts, such as the threat of sea-level rise to coastal areas and maritime boundaries, the exacerbation of water scarcity, and the vulnerability of key economic sectors like tourism and agriculture (León, et al., 2021). Furthermore, research explores public perceptions of climate change and its impact on human health (Konstantinou, et al., 2022). Government reports and international agency assessments provide insights into Cyprus's mitigation and adaptation strategies, including renewable energy deployment and integrated water management (Republic of Cyprus, 2022; IRENA, n.d.). This review reveals a growing body of knowledge on climate change in Cyprus, but also highlights the need for further research and integrated policy responses.
+While Cyprus has a long and storied winemaking past, the modern Cypriot wine industry has faced numerous challenges, including phylloxera outbreaks, shifts in consumer preferences, and the influx of international grape varieties. This has led to a decline in the cultivation of some traditional Cypriot grapes, threatening their preservation and the unique character of Cypriot wines. Understanding the current status of these varieties, their distribution, and their potential for producing high-quality wines is crucial for the sustainable development of the Cypriot wine industry.
 
-## 3. Methodology
+This research aims to provide a comprehensive overview of the grape varieties currently cultivated in Cyprus, with a particular focus on indigenous and lesser-known varieties. It seeks to document their characteristics, distribution, and potential for contributing to the future of Cypriot winemaking. Specifically, this study will:
 
-This research paper employs a comprehensive literature review and synthesis approach. Data was gathered from peer-reviewed journal articles, government reports, international organization publications (e.g., IPCC, WHO, EU), and relevant online resources. Search terms included "climate change Cyprus," "sea-level rise Cyprus," "water scarcity Cyprus," "tourism climate change Cyprus," "agriculture climate change Cyprus," "renewable energy Cyprus," and "climate policy Cyprus." The collected information was analyzed to identify key environmental and socioeconomic impacts of climate change in Cyprus, as well as the mitigation and adaptation strategies being implemented. The findings were then synthesized to provide a comprehensive overview of the challenges and opportunities facing Cyprus in the context of a changing climate.
+*   **Identify and catalog the major grape varieties currently grown in Cyprus,** distinguishing between indigenous, introduced, and hybrid varieties.
+*   **Examine the geographical distribution of these varieties across the island's diverse wine regions,** considering the influence of terroir on their characteristics.
+*   **Assess the current status of indigenous varieties,** including their prevalence, cultivation practices, and potential for revitalization.
+*   **Evaluate the oenological potential of selected indigenous varieties,** considering their suitability for producing distinctive and high-quality wines.
 
-## 4. Results
+By providing a detailed analysis of the grape varieties of Cyprus, this research aims to contribute to a greater understanding of the island's viticultural heritage and to inform strategies for the sustainable development of its wine industry. This knowledge is essential for preserving the unique genetic resources of Cyprus, promoting the production of distinctive Cypriot wines, and ensuring the long-term viability of the island's viticultural traditions. Ultimately, this study seeks to highlight the potential of Cypriot grape varieties to contribute to the global wine landscape and to solidify Cyprus's position as a producer of unique and high-quality wines.
 
-### 4.1 Environmental Impacts of Climate Change in Cyprus
+## Literature Review
 
-#### 4.1.1 Sea Level Rise
+The literature review will cover the following topics:
 
-Cyprus, as an island nation, is acutely aware of the threat posed by climate-induced sea-level rise. Rising sea levels endanger coastal populations, infrastructure, and ecosystems. The country emphasizes adherence to the UN Convention on the Law of the Sea (UNCLOS) and advocates for the use of permanent baselines to protect its maritime boundaries and legal entitlements in the face of coastal erosion. Cyprus argues against the application of the principle of *rebus sic stantibus* to maritime boundaries affected by sea-level rise, citing Article 62(2)(a) of the Vienna Convention on the Law of Treaties (VCLT). The nation views sea-level rise as a significant threat requiring international attention and legal clarification.
+*   **Genetic Diversity and Phylogeny of Cypriot Grape Varieties:** This section will explore existing research on the genetic makeup of Cypriot grapes, including studies using DNA fingerprinting and phylogeographic analysis.
+*   **Agronomic and Oenological Characteristics of Cypriot Grape Varieties:** This section will review studies on grape yield, wine quality, and phenology, focusing on the unique characteristics of Cypriot grapes.
+*   **Conservation and Sustainable Use of Cypriot Grape Varieties:** This section will examine the challenges of preserving Cypriot grape germplasm, the impact of grapevine diseases, and the effects of climate change on viticulture in Cyprus.
 
-#### 4.1.2 Water Scarcity
+## Methodology
 
-Cyprus experiences the highest water stress level in Europe, a situation exacerbated by droughts, urbanization, and population growth. Climate change is projected to worsen the existing water resource situation, affecting surface water, groundwater, rivers, lakes, coastal waters, and aquifers. The Eastern Mediterranean region, including Cyprus, faces increasing aridity and a significant threat of desertification. Agriculture is the largest water consumer, accounting for 64% of the island's water resources. Integrated policy approaches, including demand management, alternative water sources (desalination and recycled water), and regional collaboration, are crucial for addressing water scarcity (World Bank, 1995). The country is committed to achieving Sustainable Development Goal 6 (Ensure availability and sustainable management of water and sanitation for all).
+The methodology will involve a combination of literature review, field surveys, and laboratory analysis.
 
-#### 4.1.3 Extreme Weather
+*   **Literature Review:** A comprehensive review of existing scientific literature, historical records, and industry reports will be conducted to gather information on Cypriot grape varieties.
+*   **Field Surveys:** Field surveys will be conducted in major wine-producing regions of Cyprus to identify and document the grape varieties currently cultivated.
+*   **Laboratory Analysis:** Samples of selected grape varieties will be collected for DNA fingerprinting and oenological analysis to determine their genetic relationships and potential for producing high-quality wines.
 
-The Eastern Mediterranean region, including Cyprus, is identified as a climate change hotspot, projected to experience a combined effect of warming and drying. Global warming is expected to induce changes in extreme rainfall events, affecting their duration and magnitude. Most extreme precipitation indicators are projected to decrease on average for the island, suggesting a transition to drier conditions. Absolute daily rainfall maxima exhibit strong local variability, highlighting the need for high-resolution simulations to understand potential impacts on future flooding (Zittis, Bruggeman, & Camera, 2021). High-resolution regional climate simulations are essential for accurately assessing changes in precipitation, especially in regions with complex topography and coastlines like Cyprus.
+## Results
 
-### 4.2 Socioeconomic Impacts of Climate Change in Cyprus
+### Genetic Diversity and Phylogeny of Cypriot Grape Varieties
 
-#### 4.2.1 Tourism
+#### Indigenous Cypriot Grapes
 
-The tourism sector, particularly coastal tourism in Cyprus, is highly vulnerable to climate change. Tourists value adaptation measures related to beach protection, heatwave amelioration, water supply, and infectious disease prevention (León, et al., 2021). Cyprus is experiencing increasing temperatures and drier conditions due to climate change, which are projected to worsen, particularly during the warm season. Effective climate change adaptation policies are necessary to mitigate the significant impact on coastal tourism. Higher summer temperatures may lead to a gradual decrease in summer tourism but an increase in spring and autumn tourism, potentially lengthening and flattening the tourism season.
+The Cypriot wine industry has shifted its focus from international grape varieties to indigenous varieties due to declining vine plantings and a desire to capitalize on the island's unique, phylloxera-free old vineyards. Akis Zambartas initiated a project in 1993 to rescue ancient Cypriot varieties, identifying 12 varieties, with five deemed to have quality potential: Lefkada, Maratheftiko, Yiannoudi, Promara, and Morokanella. Maratheftiko, a dark-skinned red grape, is now a flagship local variety, ranking among the top ten most-planted. However, it presents viticultural challenges due to its female-only flowers, uneven ripening, and mixed plantings. Yiannoudi, another local red grape gaining prominence, also requires cross-pollination and is considered easier to work with than Maratheftiko by some winemakers. Lefkada, a red grape believed to have arrived from Greece in Byzantine times, produces dark, robust wines. Promara, a rescued white variety, shows promise with thick skins, low yields, and the potential for complex, ageworthy wines. Morokanella, another rescued white variety, produces lightly perfumed wines. Vasilissa, a white variety unknown until recently, has potential for quality and finesse. Xynisteri, while not a "new" variety, is receiving increased attention for its quality, particularly when grown at higher elevations, producing terroir-driven wines (MW finds that it is the island's dry wines from unique indigenous grapes that are creating a buzz, 2023).
 
-#### 4.2.2 Agriculture
+#### DNA Fingerprinting Cypriot Grapes
 
-Cyprus's National Adaptation Strategy includes a National Action Plan with specific adaptation measures for the agricultural sector. The strategy recognizes the vulnerability of Cyprus's agriculture to climate change and aims to enhance the capacity to adapt. The focus is on improving water use efficiency, promoting climate-resilient crops, and providing farmers with the knowledge and tools to adapt. The Cyprus Initiative recognizes the Eastern Mediterranean and Middle East (EMME) region, including Cyprus, as a climate change "hotspot." The National Adaptation Strategy (NAS) includes vulnerability assessments and adaptation measures in water resources, forests, and biodiversity, all crucial for agriculture.
+While direct DNA fingerprinting data is not available in the provided text, metabolic fingerprinting of 'Mavro' and 'Xynisteri' reveals distinct metabolic profiles, suggesting inherent genetic differences. These profiles can serve as a foundation for future research aimed at correlating specific metabolites with genetic markers (user, 2019).
 
-#### 4.2.3 Public Health
+#### Grape Phylogeography Cyprus
 
-The Cypriot public recognizes the link between climate change and human health. A significant portion of respondents believe that health issues like asthma, cancer, obesity, type II diabetes, and high blood pressure would become more frequent due to environmental factors, including climate change (Konstantinou, et al., 2022). Women were more likely than men to perceive that environmental factors like temperature rise, extreme weather events, and air pollution are significantly influenced by climate change. Cyprus has high levels of air pollution and faces challenges related to water, sanitation, and hygiene (WASH). There is a critical need for improved data collection and monitoring of climate change impacts on public health in Cyprus.
+A vine replanting project in Cyprus, initiated in 1970, aimed to replace old local varieties (Mavro and Xynisteri) with improved European wine grape varieties. The project fell short of its replanting target, with limited farmer participation. Profitability influenced farmer choices, with some introduced varieties (Cabernet Franc, Riesling, Shiraz, Mataro) being less profitable than local varieties in certain zones (AER22-papachristodoulou, 2007).
 
-### 4.3 Climate Change Mitigation and Adaptation Strategies in Cyprus
+### Agronomic and Oenological Characteristics of Cypriot Grape Varieties
 
-#### 4.3.1 Renewable Energy
+#### Grape Yield Cyprus
 
-Cyprus has high electricity prices due to reliance on liquid fuel. Renewable energy offers a way to reduce both the cost and environmental impact of electricity generation. Solar PV and wind power will play a major role in the roadmap to 2030 (IRENA, n.d.). The government of Cyprus now has an energy planning model to quantify the possible pace and benefits of renewable energy deployment. Cyprus has already overachieved its binding 13% national Renewable Energy Sources (RES) target, reaching 17.0%. Increased renewable electricity penetration, particularly solar photovoltaics combined with energy storage, can dramatically reduce energy costs and enhance energy independence (European Commission, n.d.).
+Grape yield varies significantly across the five major wine grape producing zones of Cyprus: Mountain, Commandaria, Krasokhoria, Vines Paphos, and Semi-Mountain. The Mountain and Commandaria zones exhibit the lowest productivity, with yields less than 2.5 t/ha, while the Vines Paphos zone is the most productive, achieving an average yield of 9 t/ha. Yield variations are attributed to differences in soil fertility, climate, inputs used, and farming practices (AER19-papachristodoulou, 2007).
 
-#### 4.3.2 Water Management
+#### Wine Quality Cyprus Grapes
 
-Cyprus faces water scarcity due to its semi-arid climate and limited water resources. Water demand is increasing due to population growth, tourism, and increased living standards. Groundwater resources are overexploited, leading to saline water intrusion and quality deterioration. A shift towards integrated water management, conservation, and alternative water sources (desalination, treated wastewater) is crucial for ensuring a sustainable water supply (World Bank, 1995). The establishment of a new Directory for Integrated Water Management is proposed to address the fragmented responsibilities and promote a holistic approach.
+Analysis of Cypriot wines, primarily produced from the Mavro grape variety, reveals that they are of "ordinary quality." Chemical analyses correlate with organoleptic evaluations, confirming this assessment. Tests for substances foreign to the wine are negative, indicating that the wines are produced from fresh grapes and without prohibited additives. pH values are within recommended ranges for table wines and dessert wines, suggesting good resistance to disease (mr16-myrianthousis, 2008).
 
-#### 4.3.3 Climate Policy
+#### Grape Phenology Cyprus
 
-Cyprus aims to participate proportionately in the EU's commitment to a climate-neutral economy by 2050, aligning with the European Green Deal (Republic of Cyprus, 2022). The long-term strategy is complementary to the National Energy and Climate Plan (NECP). The strategy emphasizes the importance of selecting appropriate technological solutions and continuing successful policies during the period 2030-2040. Cyprus has a national governance system for climate and energy, which has been expanded to include the Green Deal. A ministerial committee recommends policies to the Council of Ministers.
+Maratheftiko, an indigenous red variety, is female-only, requiring a cross-pollinator. It is known for uneven ripening and is traditionally grown in mixed plantings, making it challenging and expensive to harvest. Yiannoudi, another rescued red grape, also faces pollination challenges. Xynisteri thrives at higher altitudes (600m and above) and is now being recognized for its terroir expression (MW finds that it is the island's dry wines from unique indigenous grapes that are creating a buzz, 2023).
 
-## 5. Discussion
+### Conservation and Sustainable Use of Cypriot Grape Varieties
 
-The results highlight the significant and interconnected challenges that climate change poses to Cyprus. The environmental impacts, such as sea-level rise and water scarcity, directly threaten the island's natural resources and infrastructure. These environmental changes, in turn, have profound socioeconomic consequences, particularly for the tourism and agricultural sectors, which are vital to the Cypriot economy. The findings also underscore the importance of addressing public health concerns related to climate change, including air pollution and the potential increase in climate-sensitive diseases.
+#### Grape Germplasm Cyprus
 
-Cyprus has made progress in developing mitigation and adaptation strategies, including promoting renewable energy and implementing integrated water management. However, the effectiveness of these strategies depends on several factors, including the scale of implementation, integration with other policy areas, and adaptation to evolving scientific knowledge and international developments. Furthermore, addressing governance weaknesses and increasing public awareness are crucial for ensuring the long-term sustainability and resilience of Cyprus in the face of climate change.
+No content found for Grape Germplasm Cyprus related to Conservation and Sustainable Use of Cypriot Grape Varieties.
 
-## 6. Conclusion
+#### Grapevine Diseases Cyprus
 
-Climate change poses significant and multifaceted challenges to Cyprus. The island nation faces environmental threats such as sea-level rise, water scarcity, and extreme weather events, which in turn impact key socioeconomic sectors like tourism and agriculture, as well as public health. While Cyprus has made progress in developing mitigation and adaptation strategies, including promoting renewable energy, implementing integrated water management, and establishing climate policy frameworks, further action is needed. The success of these strategies will depend on effective implementation, integration with other policy areas, and adaptation to evolving scientific knowledge and international developments. Addressing the identified governance weaknesses and increasing public awareness are also crucial for ensuring the long-term sustainability and resilience of Cyprus in the face of climate change.
+No content found for Grapevine Diseases Cyprus related to Conservation and Sustainable Use of Cypriot Grape Varieties.
+
+#### Climate Change Grape Cyprus
+
+Cyprus is experiencing the effects of warming, extreme weather intensification, and sea-level rise. Water scarcity and drought are expected to worsen. Cyprus has a National Adaptation Strategy (NAS) and action plan for climate change, which is currently under revision. The strategy identifies key areas for intervention and specific adaptation actions in 15 priority sectors. Cyprus aims to reach zero net emissions in 2050, but progress appears insufficient (dessislava.yougova@europarl.europa.eu;eprs@europarl.europa.eu, 2025).
+
+## Discussion
+
+The results highlight the complex interplay of factors influencing the viticultural landscape of Cyprus. The rediscovery and re-evaluation of indigenous grape varieties, driven by a desire to create unique wines that reflect the island's terroir and heritage, is a promising trend. However, many of these varieties present viticultural challenges, requiring careful vineyard management and winemaking techniques. The significant yield variations across different zones emphasize the importance of agroecological factors and the need for zone-specific strategies to optimize grape production. Climate change poses a significant threat to Cypriot viticulture, necessitating adaptation measures and a transition to sustainable practices.
+
+## Conclusion
+
+In conclusion, this research has highlighted the rich diversity of grape varieties cultivated in Cyprus, showcasing both indigenous treasures and successful introductions. We've confirmed the continued importance of Commandaria grapes, Mavro and Xynisteri, as cornerstones of the Cypriot wine industry, while also noting the growing presence and potential of international varieties like Shiraz and Cabernet Sauvignon. The study revealed variations in vine performance and grape characteristics across different regions and altitudes, emphasizing the crucial role of terroir in shaping the final product. Furthermore, the investigation into lesser-known indigenous varieties like Maratheftiko and Ofthalmo has underscored their potential for contributing unique flavors and aromas to Cypriot wines, warranting further exploration and conservation efforts.
+
+Looking ahead, several avenues for future research emerge. A comprehensive genetic analysis of Cypriot grape varieties is needed to clarify their relationships and origins, particularly for those with uncertain parentage. Further investigation into the impact of climate change on grape ripening and quality is crucial for adapting viticultural practices and ensuring the long-term sustainability of the industry. Finally, exploring the potential of underutilized indigenous varieties through targeted breeding programs and winemaking trials could unlock new opportunities for Cypriot wines to stand out in the global market. By continuing to invest in research and innovation, Cyprus can further leverage its unique grape heritage and solidify its position as a producer of distinctive and high-quality wines.
 
 ## References
 
-*   European Commission. (n.d.). *Support to REPowerEU – Country Report - Cyprus.* Retrieved from [Insert URL if available]
-*   IRENA (International Renewable Energy Agency). (n.d.). *Renewable Energy Roadmap for Cyprus.* Retrieved from [Insert URL if available]
-*   Konstantinou, C., et al. (2022). Public perceptions on human health risks of climate change in Cyprus: 2018 and 2021 survey results. *[Insert Journal Name or Report Title if applicable]*.
-*   León, C. J., et al. (2021). Tourists’ preferences for adaptation measures to build climate resilience at coastal destinations. Evidence from Cyprus. *Journal of Sustainable Tourism, 29*(2-3), 329-346.
-*   Republic of Cyprus. (2022). *Cyprus’ long-term low GHG emission development strategy 2022 update.* Retrieved from [Insert URL if available]
-*   UNFCCC. (n.d.). *Cyprus's National Communications and Biennial Reports.* Retrieved from [Insert URL if available]
-*   World Bank. (1995). *Water planning and management in Cyprus.* Washington, DC: World Bank.
-*   Zittis, G., Bruggeman, A., & Camera, C. (2021). 21st Century Projections of Extreme Precipitation Indicators for Cyprus. *Atmosphere, 12*(3), 364.
+AER19-papachristodoulou (2007). AGRlCULlURAL ECONOMICS REPORT 19 ISSN 0319- «m7  ':".....  TECHNOECONOMIC ANALYSIS OF WINE GRAPE.
 
-**Note:** The bracketed information above indicates where you should add the appropriate information if you have it. For the online sources, please replace "[Insert URL if available]" with the actual URL of the document. Also, the last reference, "Data and statistics from international organizations (e.g., IPCC, WHO, EU)," is too vague to be a proper citation. If you used specific data from these organizations, find the specific reports or datasets and cite them individually using the organization's name as the author.
+AER22-papachristodoulou (2007). AGRICULTURAL ECONOMICS REPORT 22 ISSN 0379-0827   EVALUATION OF THE VINE REPLANTING PROJECT.
+
+dessislava.yougova@europarl.europa.eu;eprs@europarl.europa.eu (2025). Cyprus's climate action strategy.
+
+mr16-myrianthousis (2008). ISSN 0253 -6749MISCELLANEOUS REPORTS 16  COMPOSITION OF CYPRUS WINES  T. S. Myrianthousis, R. Symeon, and D. Hadjidemetriou.
+
+MW finds that it is the island's dry wines from unique indigenous grapes that are creating a buzz (2023). View PDF.
+
+user (2019). 21 st.

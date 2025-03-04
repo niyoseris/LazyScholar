@@ -580,23 +580,48 @@ This file tracks the generated topics and subtopics for your academic research p
     def generate_final_paper(self, topics: List[Dict[str, Any]]) -> str:
         """
         Generate the final research paper by combining all subtopic content.
-        
-        Args:
-            topics: List of topics and their subtopics
-            
-        Returns:
-            str: Path to the generated paper
         """
         try:
             # Create the final paper path
             paper_path = os.path.join(self.output_dir, "final_paper.md")
             
-            # Collect all content and references from subtopics
-            all_content = {}
+            # Start building the paper directly without relying entirely on the LLM
+            markdown = f"""# Research Paper: {self.problem_statement}
+
+## Abstract
+This research paper explores {self.problem_statement} through a systematic analysis of various topics and subtopics.
+
+## Table of Contents
+"""
+            # Add table of contents
+            for topic in topics:
+                markdown += f"\n### {topic['title']}\n"
+                for subtopic in topic["subtopics"]:
+                    markdown += f"* {subtopic['title']}\n"
+            
+            # Add introduction - use LLM for this part only
+            intro_prompt = f"""
+            Write a comprehensive introduction for a research paper on the following topic:
+            {self.problem_statement}
+            
+            The introduction should provide context, background, and outline the purpose of the research.
+            Keep it under 500 words.
+            """
+            
+            introduction = self._api_call_with_retry(
+                lambda: self.model.generate_content(intro_prompt).text
+            )
+            
+            markdown += "\n## Introduction\n"
+            markdown += introduction
+            markdown += "\n\n"
+            
+            # Collect all references
             all_references = []
             
+            # Add content from each topic and subtopic directly
             for topic in topics:
-                topic_content = []
+                markdown += f"\n## {topic['title']}\n"
                 
                 for subtopic in topic["subtopics"]:
                     # Get the subtopic file path
@@ -611,147 +636,67 @@ This file tracks the generated topics and subtopics for your academic research p
                         with open(subtopic_file, "r", encoding="utf-8") as f:
                             content = f.read()
                             
-                            # Extract references from the References section
+                            # Extract references
                             references_match = re.search(r'## References\s*\n(.*?)(?:\n\n|\Z)', content, re.DOTALL)
                             if references_match:
                                 references = references_match.group(1).strip()
-                                # Add to references with topic and subtopic context
                                 ref_entry = f"**{topic['title']} - {subtopic['title']}**:\n{references}"
                                 all_references.append(ref_entry)
                                 
-                                # Remove the References section as we'll collect them at the end
+                                # Remove the References section
                                 content = re.sub(r'## References\s*\n.*?(?:\n\n|\Z)', '', content, flags=re.DOTALL)
                             
-                            # Also check for old Source section format for backward compatibility
+                            # Also check for old Source section format
                             source_match = re.search(r'## Source\s*\n(.*?)(?:\n\n|\Z)', content, re.DOTALL)
                             if source_match:
                                 sources = source_match.group(1).strip()
-                                # Add to references with topic and subtopic context
                                 ref_entry = f"**{topic['title']} - {subtopic['title']}**:\n{sources}"
                                 all_references.append(ref_entry)
                                 
-                                # Remove the Source section as we'll collect them at the end
+                                # Remove the Source section
                                 content = re.sub(r'## Source\s*\n.*?(?:\n\n|\Z)', '', content, flags=re.DOTALL)
                             
-                            # Remove the title and topic line as we'll add our own
-                            content = re.sub(r"^#.*\n.*\n", "", content)
-                            subtopic_data = {
-                                "title": subtopic["title"],
-                                "content": content
-                            }
-                            topic_content.append(subtopic_data)
-                
-                all_content[topic["title"]] = topic_content
+                            # Remove the title header but keep the content
+                            content = re.sub(r"^# [^\n]+\n+", "", content)
+                            
+                            # Add the subtopic content
+                            markdown += f"\n### {subtopic['title']}\n"
+                            markdown += content.strip() + "\n\n"
             
-            # Generate a structured outline for the LLM
-            topics_structure = []
-            for topic in topics:
-                topic_data = {
-                    "title": topic["title"],
-                    "subtopics": [subtopic["title"] for subtopic in topic["subtopics"]]
-                }
-                topics_structure.append(topic_data)
-            
-            # Generate the final paper content
-            prompt = f"""
-            Generate a comprehensive research paper on the following topic:
-            
+            # Add conclusion - use LLM for this part only
+            conclusion_prompt = f"""
+            Write a conclusion for a research paper on the following topic:
             {self.problem_statement}
             
-            Using the following structure:
-            
-            # Research Paper: {self.problem_statement}
-            
-            ## Abstract
-            [Generate a concise abstract summarizing the research]
-            
-            ## Introduction
-            [Generate an introduction to the topic]
-            
-            ## Main Content
-            [For each topic and subtopic, synthesize the provided content into a cohesive narrative]
-            
-            ## Conclusion
-            [Generate a conclusion summarizing the key findings]
-            
-            ## References
-            [Include all references in proper academic format]
-            
-            Here is the content to synthesize:
-            
-            {json.dumps(topics_structure)}
-            
-            And here is the detailed content for each subtopic:
-            
-            {json.dumps(all_content)}
+            The conclusion should summarize key findings and suggest future research directions.
+            Keep it under 300 words.
             """
             
-            # Generate the paper using the Gemini model
-            response = self._api_call_with_retry(
-                lambda: self.model.generate_content(prompt).text
+            conclusion = self._api_call_with_retry(
+                lambda: self.model.generate_content(conclusion_prompt).text
             )
             
-            # Add references section
-            if "## References" not in response:
-                response += "\n\n## References\n"
+            markdown += "\n## Conclusion\n"
+            markdown += conclusion
             
-            # If there are no references in the generated content, add them
-            if all_references and "## References" in response:
-                # Find the references section
-                references_section = response.split("## References")[1]
-                
-                # Check if the references section is empty or minimal
-                if len(references_section.strip()) < 50:  # Arbitrary threshold
-                    # Replace the references section with our collected references
-                    response = response.split("## References")[0]
-                    response += "## References\n\n"
-                    
-                    # Add each reference
-                    for ref in all_references:
-                        response += f"{ref}\n\n"
-                else:
-                    # The model generated a good references section, keep it
-                    pass
+            # Add references section
+            markdown += "\n\n## References\n"
+            if all_references:
+                for ref in all_references:
+                    markdown += f"{ref}\n\n"
+            else:
+                markdown += "No references were found in the source materials.\n"
             
             # Write the paper
             with open(paper_path, "w", encoding="utf-8") as f:
-                f.write(response)
+                f.write(markdown)
             
             logger.info(f"Generated final paper at {paper_path}")
-            
-            # Check if we should format as academic paper
-            if hasattr(self, 'academic_format') and self.academic_format:
-                logger.info("Formatting final paper as academic paper...")
-                try:
-                    # Import the academic_formatter module
-                    import academic_formatter
-                    
-                    # Initialize the model
-                    model = academic_formatter.initialize_model()
-                    if not model:
-                        logger.error("Failed to initialize model for academic formatting")
-                        return
-                    
-                    # Extract references and content
-                    pdf_references, content = academic_formatter.extract_references_from_final_paper(paper_path)
-                    
-                    # Format as academic paper
-                    formatted_paper = academic_formatter.format_as_academic_paper(model, content, pdf_references)
-                    
-                    # Save formatted paper
-                    output_path = academic_formatter.save_formatted_paper(paper_path, formatted_paper)
-                    
-                    if output_path:
-                        logger.info(f"Successfully formatted final paper as academic paper at {output_path}")
-                    else:
-                        logger.error("Failed to save formatted academic paper")
-                except Exception as e:
-                    logger.error(f"Error formatting final paper: {str(e)}")
-            
             return paper_path
+            
         except Exception as e:
             logger.error(f"Error generating final paper: {str(e)}")
-            raise
+            return None
     
     def _enhance_references(self, references: List[Dict[str, Any]]) -> List[str]:
         """

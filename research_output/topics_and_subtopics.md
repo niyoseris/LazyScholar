@@ -5,29 +5,29 @@ This file tracks the generated topics and subtopics for your academic research p
 ## Current Research Status
 
 ### Research Topics
-- Environmental Impacts of Climate Change in Cyprus
-- Socioeconomic Impacts of Climate Change in Cyprus
-- Climate Change Mitigation and Adaptation Strategies in Cyprus
+- Genetic Diversity and Phylogeny of Cypriot Grape Varieties
+- Agronomic and Oenological Characteristics of Cypriot Grape Varieties
+- Conservation and Sustainable Use of Cypriot Grape Varieties
 
 ### Subtopics Status
 
-#### Environmental Impacts of Climate Change in Cyprus
-- [ ] {'title': 'Sea Level Rise Cyprus', 'status': 'pending'}
-- [ ] {'title': 'Water Scarcity Cyprus', 'status': 'pending'}
-- [ ] {'title': 'Extreme Weather Cyprus', 'status': 'pending'}
+#### Genetic Diversity and Phylogeny of Cypriot Grape Varieties
+- [ ] {'title': 'Indigenous Cypriot Grapes', 'status': 'pending'}
+- [ ] {'title': 'DNA Fingerprinting Cypriot Grapes', 'status': 'pending'}
+- [ ] {'title': 'Grape Phylogeography Cyprus', 'status': 'pending'}
 
-#### Socioeconomic Impacts of Climate Change in Cyprus
-- [ ] {'title': 'Tourism Climate Change Cyprus', 'status': 'pending'}
-- [ ] {'title': 'Agriculture Climate Change Cyprus', 'status': 'pending'}
-- [ ] {'title': 'Public Health Climate Change Cyprus', 'status': 'pending'}
+#### Agronomic and Oenological Characteristics of Cypriot Grape Varieties
+- [ ] {'title': 'Grape Yield Cyprus', 'status': 'pending'}
+- [ ] {'title': 'Wine Quality Cyprus Grapes', 'status': 'pending'}
+- [ ] {'title': 'Grape Phenology Cyprus', 'status': 'pending'}
 
-#### Climate Change Mitigation and Adaptation Strategies in Cyprus
-- [ ] {'title': 'Renewable Energy Cyprus', 'status': 'pending'}
-- [ ] {'title': 'Water Management Cyprus', 'status': 'pending'}
-- [ ] {'title': 'Climate Policy Cyprus', 'status': 'pending'}
+#### Conservation and Sustainable Use of Cypriot Grape Varieties
+- [ ] {'title': 'Grape Germplasm Cyprus', 'status': 'pending'}
+- [ ] {'title': 'Grapevine Diseases Cyprus', 'status': 'pending'}
+- [ ] {'title': 'Climate Change Grape Cyprus', 'status': 'pending'}
 
 ## Research Progress
-- Research initiated: 2025-03-03
+- Research initiated: 2025-03-04
 - Topics generated: 3
 - Subtopics generated: 9
 - Completed subtopics: 0
