@@ -5,26 +5,26 @@ This file tracks the generated topics and subtopics for your academic research p
 ## Current Research Status
 
 ### Research Topics
-- Genetic Diversity and Phylogeny of Cypriot Grape Varieties
-- Agronomic and Oenological Characteristics of Cypriot Grape Varieties
-- Conservation and Sustainable Use of Cypriot Grape Varieties
+- Political Views and Ideologies
+- Pop Music as a Cultural and Social Force
+- Correlation and Causation between Pop Music and Political Views
 
 ### Subtopics Status
 
-#### Genetic Diversity and Phylogeny of Cypriot Grape Varieties
-- [ ] {'title': 'Indigenous Cypriot Grapes', 'status': 'pending'}
-- [ ] {'title': 'DNA Fingerprinting Cypriot Grapes', 'status': 'pending'}
-- [ ] {'title': 'Grape Phylogeography Cyprus', 'status': 'pending'}
+#### Political Views and Ideologies
+- [ ] {'title': 'Political Ideologies', 'status': 'pending'}
+- [ ] {'title': 'Political Polarization', 'status': 'pending'}
+- [ ] {'title': 'Political Activism', 'status': 'pending'}
 
-#### Agronomic and Oenological Characteristics of Cypriot Grape Varieties
-- [ ] {'title': 'Grape Yield Cyprus', 'status': 'pending'}
-- [ ] {'title': 'Wine Quality Cyprus Grapes', 'status': 'pending'}
-- [ ] {'title': 'Grape Phenology Cyprus', 'status': 'pending'}
+#### Pop Music as a Cultural and Social Force
+- [ ] {'title': 'Pop Music Influence', 'status': 'pending'}
+- [ ] {'title': 'Pop Music Lyrics', 'status': 'pending'}
+- [ ] {'title': 'Artist Activism', 'status': 'pending'}
 
-#### Conservation and Sustainable Use of Cypriot Grape Varieties
-- [ ] {'title': 'Grape Germplasm Cyprus', 'status': 'pending'}
-- [ ] {'title': 'Grapevine Diseases Cyprus', 'status': 'pending'}
-- [ ] {'title': 'Climate Change Grape Cyprus', 'status': 'pending'}
+#### Correlation and Causation between Pop Music and Political Views
+- [ ] {'title': 'Music Preference Politics', 'status': 'pending'}
+- [ ] {'title': 'Genre Political Alignment', 'status': 'pending'}
+- [ ] {'title': 'Music Induced Political Change', 'status': 'pending'}
 
 ## Research Progress
 - Research initiated: 2025-03-04

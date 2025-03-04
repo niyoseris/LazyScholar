@@ -585,27 +585,41 @@ This file tracks the generated topics and subtopics for your academic research p
             # Create the final paper path
             paper_path = os.path.join(self.output_dir, "final_paper.md")
             
-            # Start building the paper directly without relying entirely on the LLM
+            # Start building the paper
             markdown = f"""# Research Paper: {self.problem_statement}
 
 ## Abstract
-This research paper explores {self.problem_statement} through a systematic analysis of various topics and subtopics.
-
-## Table of Contents
 """
+            # Generate abstract with LLM
+            abstract_prompt = f"""
+            Write a concise academic abstract (150-250 words) for a research paper on:
+            {self.problem_statement}
+            
+            The paper covers these main topics:
+            {", ".join([topic["title"] for topic in topics])}
+            """
+            
+            abstract = self._api_call_with_retry(
+                lambda: self.model.generate_content(abstract_prompt).text
+            )
+            markdown += abstract + "\n\n"
+            
             # Add table of contents
+            markdown += "## Table of Contents\n"
             for topic in topics:
                 markdown += f"\n### {topic['title']}\n"
                 for subtopic in topic["subtopics"]:
                     markdown += f"* {subtopic['title']}\n"
             
-            # Add introduction - use LLM for this part only
+            # Generate introduction
             intro_prompt = f"""
-            Write a comprehensive introduction for a research paper on the following topic:
+            Write a comprehensive academic introduction (400-600 words) for a research paper on:
             {self.problem_statement}
             
-            The introduction should provide context, background, and outline the purpose of the research.
-            Keep it under 500 words.
+            The paper covers these main topics:
+            {", ".join([topic["title"] for topic in topics])}
+            
+            Include proper in-text citations where appropriate using (Author, Year) format.
             """
             
             introduction = self._api_call_with_retry(
@@ -613,16 +627,16 @@ This research paper explores {self.problem_statement} through a systematic analy
             )
             
             markdown += "\n## Introduction\n"
-            markdown += introduction
-            markdown += "\n\n"
+            markdown += introduction + "\n\n"
             
-            # Collect all references
-            all_references = []
+            # Collect all citations for the references section
+            all_citations = []
             
-            # Add content from each topic and subtopic directly
+            # Process each topic and its subtopics
             for topic in topics:
                 markdown += f"\n## {topic['title']}\n"
                 
+                # Process each subtopic
                 for subtopic in topic["subtopics"]:
                     # Get the subtopic file path
                     subtopic_file = os.path.join(
@@ -633,43 +647,84 @@ This research paper explores {self.problem_statement} through a systematic analy
                     )
                     
                     if os.path.exists(subtopic_file):
+                        # Read the subtopic file
                         with open(subtopic_file, "r", encoding="utf-8") as f:
-                            content = f.read()
-                            
-                            # Extract references
-                            references_match = re.search(r'## References\s*\n(.*?)(?:\n\n|\Z)', content, re.DOTALL)
-                            if references_match:
-                                references = references_match.group(1).strip()
-                                ref_entry = f"**{topic['title']} - {subtopic['title']}**:\n{references}"
-                                all_references.append(ref_entry)
-                                
-                                # Remove the References section
-                                content = re.sub(r'## References\s*\n.*?(?:\n\n|\Z)', '', content, flags=re.DOTALL)
-                            
-                            # Also check for old Source section format
-                            source_match = re.search(r'## Source\s*\n(.*?)(?:\n\n|\Z)', content, re.DOTALL)
-                            if source_match:
-                                sources = source_match.group(1).strip()
-                                ref_entry = f"**{topic['title']} - {subtopic['title']}**:\n{sources}"
-                                all_references.append(ref_entry)
-                                
-                                # Remove the Source section
-                                content = re.sub(r'## Source\s*\n.*?(?:\n\n|\Z)', '', content, flags=re.DOTALL)
-                            
-                            # Remove the title header but keep the content
-                            content = re.sub(r"^# [^\n]+\n+", "", content)
-                            
-                            # Add the subtopic content
-                            markdown += f"\n### {subtopic['title']}\n"
-                            markdown += content.strip() + "\n\n"
+                            subtopic_content = f.read()
+                        
+                        # Extract references/citations
+                        references_section = ""
+                        references_match = re.search(r'## References\s*\n(.*?)(?:\n\n|\Z)', subtopic_content, re.DOTALL)
+                        if references_match:
+                            references_section = references_match.group(1).strip()
+                            # Store citations for the final references section
+                            citation_lines = references_section.split('\n')
+                            for line in citation_lines:
+                                line = line.strip()
+                                if line and not line.startswith("No sources") and len(line) > 10:
+                                    all_citations.append(line)
+                        
+                            # Remove the References section for processing
+                            subtopic_content = re.sub(r'## References\s*\n.*?(?:\n\n|\Z)', '', subtopic_content, flags=re.DOTALL)
+                        
+                        # Also check for old Source section format
+                        source_match = re.search(r'## Source\s*\n(.*?)(?:\n\n|\Z)', subtopic_content, re.DOTALL)
+                        if source_match:
+                            source_section = source_match.group(1).strip()
+                            # Store citations for the final references section
+                            source_lines = source_section.split('\n')
+                            for line in source_lines:
+                                line = line.strip()
+                                if line and not line.startswith("No sources") and len(line) > 10:
+                                    all_citations.append(line)
+                        
+                        # Remove the title header
+                        subtopic_content = re.sub(r"^# [^\n]+\n+", "", subtopic_content)
+                        
+                        # Process the subtopic content with LLM to create a polished section
+                        # while preserving citations
+                        section_prompt = f"""
+                        Rewrite and enhance the following content into a polished academic section for a research paper.
+                        
+                        Topic: {topic["title"]}
+                        Subtopic: {subtopic["title"]}
+                        
+                        IMPORTANT:
+                        1. Preserve ALL in-text citations in (Author, Year) format
+                        2. Maintain all factual information
+                        3. Organize into logical paragraphs with smooth transitions
+                        4. Use academic language and tone
+                        5. Do not add new citations that aren't in the original text
+                        
+                        Content to enhance:
+                        {subtopic_content}
+                        
+                        References to cite from (use these exact citations):
+                        {references_section if references_match else source_section if source_match else ""}
+                        """
+                        
+                        enhanced_section = self._api_call_with_retry(
+                            lambda: self.model.generate_content(section_prompt).text
+                        )
+                        
+                        # Add the enhanced section to the paper
+                        markdown += f"\n### {subtopic['title']}\n"
+                        markdown += enhanced_section + "\n\n"
+                    else:
+                        markdown += f"\n### {subtopic['title']}\n"
+                        markdown += f"No content available for this subtopic.\n\n"
             
-            # Add conclusion - use LLM for this part only
+            # Generate conclusion
             conclusion_prompt = f"""
-            Write a conclusion for a research paper on the following topic:
+            Write an academic conclusion (300-500 words) for a research paper on:
             {self.problem_statement}
             
-            The conclusion should summarize key findings and suggest future research directions.
-            Keep it under 300 words.
+            The conclusion should:
+            1. Summarize key findings
+            2. Discuss implications
+            3. Acknowledge limitations
+            4. Suggest directions for future research
+            
+            Include proper in-text citations where appropriate using (Author, Year) format.
             """
             
             conclusion = self._api_call_with_retry(
@@ -677,14 +732,37 @@ This research paper explores {self.problem_statement} through a systematic analy
             )
             
             markdown += "\n## Conclusion\n"
-            markdown += conclusion
+            markdown += conclusion + "\n\n"
             
             # Add references section
-            markdown += "\n\n## References\n"
-            if all_references:
-                for ref in all_references:
-                    markdown += f"{ref}\n\n"
-            else:
+            markdown += "\n## References\n\n"
+            
+            # Process and deduplicate citations
+            unique_citations = []
+            seen_citations = set()
+            
+            for citation in all_citations:
+                # Normalize citation to help with deduplication
+                # Remove numbers at the beginning (e.g., "1. ")
+                normalized = re.sub(r'^\d+\.\s+', '', citation)
+                
+                # Skip if we've seen this citation before
+                if normalized in seen_citations:
+                    continue
+                    
+                seen_citations.add(normalized)
+                unique_citations.append(citation)
+            
+            # Sort citations alphabetically
+            unique_citations.sort(key=lambda x: re.sub(r'^\d+\.\s+', '', x).lower())
+            
+            # Add citations to the references section
+            for i, citation in enumerate(unique_citations, 1):
+                # If citation already starts with a number, replace it
+                citation = re.sub(r'^\d+\.\s+', '', citation)
+                markdown += f"{i}. {citation}\n\n"
+            
+            if not unique_citations:
                 markdown += "No references were found in the source materials.\n"
             
             # Write the paper

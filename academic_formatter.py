@@ -144,34 +144,43 @@ def extract_references_from_final_paper(final_paper_path):
         if os.path.exists(pdf_dir):
             pdf_files = [os.path.join(pdf_dir, f) for f in os.listdir(pdf_dir) if f.endswith('.pdf')]
         
-        # If no PDFs found, try to find any PDF mentions in the content
-        if not pdf_files:
-            pdf_pattern = re.compile(r'([^\/\s]+\.pdf)')
-            for match in pdf_pattern.finditer(content):
-                pdf_file = match.group(1)
-                pdf_path = os.path.join(pdf_dir, pdf_file)
-                if os.path.exists(pdf_path) and pdf_path not in pdf_files:
-                    pdf_files.append(pdf_path)
-        
-        # Extract existing citations from the content
-        # Look for both APA style citations and old SOURCE format
-        citation_patterns = [
-            re.compile(r'\(([^)]+?, \d{4})\)'),  # APA style (Author, Year)
-            re.compile(r'(\d+\.\s+[^(]+\(\d{4}\)[^\.]+\.)'),  # Numbered reference: 1. Author (Year). Title.
-            re.compile(r'SOURCE \d+: ([^\.]+\.pdf)'),  # Old SOURCE format
-        ]
-        
-        citations = set()
-        for pattern in citation_patterns:
-            for match in pattern.finditer(content):
-                citation = match.group(1)
-                citations.add(citation)
-        
-        logger.info(f"Found {len(citations)} citations in the paper")
-        logger.info(f"Found {len(pdf_files)} PDF files in the directory")
-        
-        logger.info(f"Extracted {len(pdf_files)} PDF references from the final paper")
-        return pdf_files, content
+        # Extract references section
+        references_match = re.search(r'## References\s*\n(.*?)(?:\n#|\Z)', content, re.DOTALL)
+        if references_match:
+            references_section = references_match.group(1).strip()
+            
+            # Extract individual references
+            references = []
+            # Pattern for numbered references
+            ref_pattern = re.compile(r'(?:^|\n)(?:\d+\.\s+)?(.*?)(?=\n\d+\.|$)', re.DOTALL)
+            for match in ref_pattern.finditer(references_section):
+                ref = match.group(1).strip()
+                if ref and not ref.startswith("No references"):
+                    references.append(ref)
+            
+            logger.info(f"Extracted {len(references)} references from the paper")
+            
+            # Try to match references to PDF files
+            matched_pdfs = []
+            for pdf_path in pdf_files:
+                pdf_name = os.path.basename(pdf_path)
+                # Check if PDF filename appears in any reference
+                for ref in references:
+                    if pdf_name.lower() in ref.lower():
+                        matched_pdfs.append(pdf_path)
+                        break
+            
+            # If we couldn't match PDFs by name, include all PDFs
+            if not matched_pdfs and pdf_files:
+                matched_pdfs = pdf_files
+                logger.info(f"Using all {len(matched_pdfs)} available PDFs for citation generation")
+            else:
+                logger.info(f"Matched {len(matched_pdfs)} PDFs to references")
+            
+            return matched_pdfs, content
+        else:
+            logger.warning("No References section found in the paper")
+            return pdf_files, content
     except Exception as e:
         logger.error(f"Error extracting references: {str(e)}")
         return [], ""
@@ -214,82 +223,119 @@ def generate_academic_citations(pdf_paths):
 def format_as_academic_paper(model, content, pdf_paths):
     """Format the content as an academic paper with in-text citations."""
     try:
-        # Generate proper academic citations
-        citations = generate_academic_citations(pdf_paths)
+        # Extract existing structure and content
+        sections = {}
+        current_section = "preamble"
+        sections[current_section] = []
         
-        # If no citations were found, extract existing citations from the content
-        if not citations:
-            # Check if there are already formatted citations in the content
-            references_section_match = re.search(r'## References\s*\n(.*?)(?:\n\n|\Z|$)', content, re.DOTALL)
-            if references_section_match:
-                references_section = references_section_match.group(1).strip()
-                # If references section has content, use it
-                if references_section:
-                    # Extract individual references
-                    reference_pattern = re.compile(r'(?:\d+\.\s+)?(.*?)(?:\n|$)')
-                    for match in reference_pattern.finditer(references_section):
-                        ref = match.group(1).strip()
-                        if ref and len(ref) > 10:  # Arbitrary minimum length to filter out noise
-                            citations.append(ref)
+        # Parse the original content to preserve structure
+        for line in content.split('\n'):
+            if line.startswith('# '):
+                # Main title
+                sections["title"] = line[2:].strip()
+            elif line.startswith('## '):
+                # Section heading
+                current_section = line[3:].strip().lower()
+                sections[current_section] = []
+            elif line.startswith('### '):
+                # Subsection - add to current section with formatting
+                sections[current_section].append(line)
+            else:
+                # Regular content
+                if current_section in sections:
+                    sections[current_section].append(line)
+        
+        # Extract existing references
+        references = []
+        if "references" in sections:
+            ref_content = '\n'.join(sections["references"])
+            # Extract numbered references
+            ref_pattern = re.compile(r'(?:^|\n)(?:\d+\.\s+)?(.*?)(?=\n\d+\.|$)', re.DOTALL)
+            for match in ref_pattern.finditer(ref_content):
+                ref = match.group(1).strip()
+                if ref and not ref.startswith("No references"):
+                    references.append(ref)
+        
+        # Add citations from PDF metadata if available
+        pdf_citations = generate_academic_citations(pdf_paths)
+        
+        # Combine all references, removing duplicates
+        all_references = []
+        seen_refs = set()
+        
+        # First add existing references from the paper
+        for ref in references:
+            normalized = re.sub(r'^\**.*?\**:\s*', '', ref).strip()  # Remove topic/subtopic prefixes
+            if normalized and normalized not in seen_refs:
+                seen_refs.add(normalized)
+                all_references.append(ref)
+        
+        # Then add references from PDF metadata
+        for ref in pdf_citations:
+            normalized = ref.lower()
+            # Check if this reference is already included (approximate matching)
+            is_duplicate = False
+            for existing in seen_refs:
+                # Simple similarity check - if 70% of words match, consider it a duplicate
+                ref_words = set(normalized.split())
+                existing_words = set(existing.lower().split())
+                if len(ref_words) > 0 and len(existing_words) > 0:
+                    common_words = ref_words.intersection(existing_words)
+                    similarity = len(common_words) / min(len(ref_words), len(existing_words))
+                    if similarity > 0.7:
+                        is_duplicate = True
+                        break
             
-            # If still no citations, generate placeholder citations based on topics
-            if not citations:
-                # Extract topics from content
-                topic_pattern = re.compile(r'## ([^\n]+)')
-                topics = [match.group(1) for match in topic_pattern.finditer(content)]
-                
-                # Common section names to exclude
-                common_sections = ['abstract', 'introduction', 'conclusion', 'references', 'keywords', 
-                                  'literature review', 'methodology', 'results', 'discussion']
-                
-                # Generate placeholder citations for each topic
-                for topic in topics:
-                    if topic.lower() not in common_sections:
-                        author = topic.split()[0] if topic else "Author"
-                        citations.append(f"{author} et al. (2023). Research on {topic}. Journal of Electronic Materials.")
+            if not is_duplicate:
+                seen_refs.add(normalized)
+                all_references.append(ref)
         
-        # Extract title and problem statement
-        title_match = re.search(r'^# (.+?)$', content, re.MULTILINE)
-        title = title_match.group(1) if title_match else "Research Paper"
+        # Extract title
+        title = sections.get("title", "Research Paper")
         
-        # Create a prompt for the model to format the paper
+        # Create a more flexible prompt for academic formatting
         prompt = f"""
-        Format the following research paper as an academic document with proper citations and structure.
+        Enhance the following research paper to meet academic standards while preserving its original content and structure.
         
-        Original paper title: {title}
+        Paper title: {title}
         
-        The paper should include:
-        1. Title
-        2. Abstract
-        3. Keywords
-        4. Introduction
-        5. Literature Review
-        6. Methodology
-        7. Results
-        8. Discussion
-        9. Conclusion
-        10. References (in APA format)
+        IMPORTANT GUIDELINES:
+        1. Preserve ALL original content and insights
+        2. Maintain the existing section structure where possible
+        3. Ensure all in-text citations use proper academic format (Author, Year)
+        4. Connect in-text citations to the references list
+        5. Improve language for clarity and academic tone
+        6. Format the paper in proper academic style
+        7. DO NOT invent new content or findings
+        8. DO NOT remove substantive content
+        
+        Original paper structure:
+        {json.dumps({k: len(v) for k, v in sections.items()}, indent=2)}
         
         Original content:
         {content}
         
-        For the references section, use these citations in proper APA style:
-        {json.dumps(citations, indent=2)}
+        References to include (in APA format):
+        {json.dumps(all_references, indent=2)}
         
         The output should be in Markdown format.
-        
-        Important: For any citations that are already in proper academic format (e.g., "Author et al. (2023). Title."), 
-        keep them as is. Only reformat citations that are in non-academic format (e.g., filenames or URLs).
         """
         
         # Generate the formatted paper
         response = model.generate_content(prompt)
         formatted_paper = response.text
         
+        # Ensure references are properly included
+        if "## References" not in formatted_paper:
+            formatted_paper += "\n\n## References\n\n"
+            for i, ref in enumerate(all_references, 1):
+                formatted_paper += f"{i}. {ref}\n\n"
+        
         logger.info("Successfully formatted the paper as an academic document")
         return formatted_paper
     except Exception as e:
         logger.error(f"Error formatting as academic paper: {str(e)}")
+        # Return original content if formatting fails
         return content
 
 def save_formatted_paper(final_paper_path, formatted_paper):
