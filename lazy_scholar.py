@@ -176,23 +176,23 @@ class LazyScholar:
             
             # Initialize the model for general use
             self.model = genai.GenerativeModel(
-                model_name="gemini-2.0-flash-001",
+                model_name="gemini-2.0-flash-exp",
                 generation_config=generation_config,
                 safety_settings=safety_settings
             )
-            logger.info(f"Successfully initialized Gemini model with name: gemini-2.0-flash-001")
+            logger.info(f"Successfully initialized Gemini model with name: gemini-2.0-flash-exp")
             
             # Initialize the vision model
             self.vision_model = genai.GenerativeModel(
-                model_name="gemini-2.0-flash-001",
+                model_name="gemini-2.0-flash-exp",
                 generation_config=generation_config,
                 safety_settings=safety_settings
             )
-            logger.info(f"Successfully initialized Vision model with name: gemini-2.0-flash-001")
+            logger.info(f"Successfully initialized Vision model with name: gemini-2.0-flash-exp")
             
             # Initialize the model for final paper generation
             self.gemini = genai.GenerativeModel(
-                model_name="gemini-2.0-flash-001",
+                model_name="gemini-2.0-flash-exp",
                 generation_config=generation_config
             )
             
@@ -303,14 +303,13 @@ class LazyScholar:
         
         try:
             # Prepare the prompt for Gemini
-            prompt = f"""Analyze this research problem and break it down into main topics and subtopics:
+            prompt = f"""Analyze this research problem and break it down into main topics and subtopics for an academic paper:
 
 Problem: {problem_statement}
 
-Please identify 2-3 main research topics and 2-3 specific subtopics for each main topic.
 Focus on the key aspects that need to be investigated to thoroughly understand this problem.
-Subtopics will be used as search keywords by their own. So it's important to make them short and related with the main topic.
-
+Subtopics will be used as search keywords by their own. So it's important to make them short and related with the main topic. Mention problem sentence while creating subtopic.
+Don't use generic subtopics like "Background", "Current Research", "Future Directions", etc.
 Format your response as JSON with this structure:
 {{
     "topics": [
@@ -611,6 +610,27 @@ This file tracks the generated topics and subtopics for your academic research p
                 for subtopic in topic["subtopics"]:
                     markdown += f"* {subtopic['title']}\n"
             
+            # Add methodology section
+            methodology_prompt = f"""
+            Write a methodology section (250-350 words) for an academic literature review on:
+            {self.problem_statement}
+            
+            Describe:
+            1. The approach to literature selection and review
+            2. Criteria for including/excluding sources
+            3. How the information was analyzed and synthesized
+            4. Any limitations of the methodology
+            
+            Use formal academic language appropriate for a scholarly paper.
+            """
+            
+            methodology = self._api_call_with_retry(
+                lambda: self.model.generate_content(methodology_prompt).text
+            )
+            
+            markdown += "\n## Methodology\n"
+            markdown += methodology + "\n\n"
+            
             # Generate introduction
             intro_prompt = f"""
             Write a comprehensive academic introduction (400-600 words) for a research paper on:
@@ -631,6 +651,7 @@ This file tracks the generated topics and subtopics for your academic research p
             
             # Collect all citations for the references section
             all_citations = []
+            citation_mapping = {}  # To map in-text citations to full references
             
             # Process each topic and its subtopics
             for topic in topics:
@@ -662,56 +683,69 @@ This file tracks the generated topics and subtopics for your academic research p
                                 line = line.strip()
                                 if line and not line.startswith("No sources") and len(line) > 10:
                                     all_citations.append(line)
+                                    
+                                    # Extract author and year for citation mapping
+                                    author_year_match = re.search(r'(\d+)\.\s+([^(]+)\((\d{4}|\[Year unknown\])\)', line)
+                                    if author_year_match:
+                                        citation_num = author_year_match.group(1)
+                                        author = author_year_match.group(2).strip()
+                                        year = author_year_match.group(3)
+                                        
+                                        # Get last name for first author
+                                        last_name = author.split(',')[0] if ',' in author else author.split(' ')[0]
+                                        
+                                        # Create citation key
+                                        citation_key = f"({last_name}, {year})"
+                                        citation_mapping[citation_key] = line
                         
-                            # Remove the References section for processing
-                            subtopic_content = re.sub(r'## References\s*\n.*?(?:\n\n|\Z)', '', subtopic_content, flags=re.DOTALL)
-                        
-                        # Also check for old Source section format
-                        source_match = re.search(r'## Source\s*\n(.*?)(?:\n\n|\Z)', subtopic_content, re.DOTALL)
-                        if source_match:
-                            source_section = source_match.group(1).strip()
-                            # Store citations for the final references section
-                            source_lines = source_section.split('\n')
-                            for line in source_lines:
-                                line = line.strip()
-                                if line and not line.startswith("No sources") and len(line) > 10:
-                                    all_citations.append(line)
-                        
-                        # Remove the title header
-                        subtopic_content = re.sub(r"^# [^\n]+\n+", "", subtopic_content)
-                        
-                        # Process the subtopic content with LLM to create a polished section
-                        # while preserving citations
-                        section_prompt = f"""
-                        Rewrite and enhance the following content into a polished academic section for a research paper.
-                        
-                        Topic: {topic["title"]}
-                        Subtopic: {subtopic["title"]}
-                        
-                        IMPORTANT:
-                        1. Preserve ALL in-text citations in (Author, Year) format
-                        2. Maintain all factual information
-                        3. Organize into logical paragraphs with smooth transitions
-                        4. Use academic language and tone
-                        5. Do not add new citations that aren't in the original text
-                        
-                        Content to enhance:
-                        {subtopic_content}
-                        
-                        References to cite from (use these exact citations):
-                        {references_section if references_match else source_section if source_match else ""}
-                        """
-                        
-                        enhanced_section = self._api_call_with_retry(
-                            lambda: self.model.generate_content(section_prompt).text
-                        )
-                        
-                        # Add the enhanced section to the paper
-                        markdown += f"\n### {subtopic['title']}\n"
-                        markdown += enhanced_section + "\n\n"
-                    else:
-                        markdown += f"\n### {subtopic['title']}\n"
-                        markdown += f"No content available for this subtopic.\n\n"
+                        # Remove the References section for processing
+                        subtopic_content = re.sub(r'## References\s*\n.*?(?:\n\n|\Z)', '', subtopic_content, flags=re.DOTALL)
+                    
+                    # Also check for old Source section format
+                    source_match = re.search(r'## Source\s*\n(.*?)(?:\n\n|\Z)', subtopic_content, re.DOTALL)
+                    if source_match:
+                        source_section = source_match.group(1).strip()
+                        # Store citations for the final references section
+                        source_lines = source_section.split('\n')
+                        for line in source_lines:
+                            line = line.strip()
+                            if line and not line.startswith("No sources") and len(line) > 10:
+                                all_citations.append(line)
+                    
+                    # Remove the title header
+                    subtopic_content = re.sub(r"^# [^\n]+\n+", "", subtopic_content)
+                    
+                    # Process the subtopic content with LLM to create a polished section
+                    # while preserving citations
+                    section_prompt = f"""
+                    Rewrite and enhance the following content into a polished academic section for a research paper.
+                    
+                    Topic: {topic["title"]}
+                    Subtopic: {subtopic["title"]}
+                    
+                    IMPORTANT:
+                    1. Preserve ALL in-text citations in (Author, Year) format
+                    2. Maintain all factual information
+                    3. Organize into logical paragraphs with smooth transitions
+                    4. Use academic language and tone
+                    5. Do not add new citations that aren't in the original text
+                    6. Ensure all claims are supported by evidence
+                    7. Add critical analysis comparing different perspectives when possible
+                    
+                    Content to enhance:
+                    {subtopic_content}
+                    """
+                    
+                    enhanced_section = self._api_call_with_retry(
+                        lambda: self.model.generate_content(section_prompt).text
+                    )
+                    
+                    # Add the enhanced section to the paper
+                    markdown += f"\n### {subtopic['title']}\n"
+                    markdown += enhanced_section + "\n\n"
+                else:
+                    markdown += f"\n### {subtopic['title']}\n"
+                    markdown += f"No content available for this subtopic.\n\n"
             
             # Generate conclusion
             conclusion_prompt = f"""
@@ -719,12 +753,14 @@ This file tracks the generated topics and subtopics for your academic research p
             {self.problem_statement}
             
             The conclusion should:
-            1. Summarize key findings
-            2. Discuss implications
-            3. Acknowledge limitations
-            4. Suggest directions for future research
+            1. Summarize key findings from the paper (not just general knowledge)
+            2. Discuss implications of these specific findings
+            3. Acknowledge limitations of the research
+            4. Suggest specific directions for future research based on gaps identified
             
             Include proper in-text citations where appropriate using (Author, Year) format.
+            Avoid introducing new information not covered in the paper.
+            Focus on synthesizing the findings rather than repeating the introduction.
             """
             
             conclusion = self._api_call_with_retry(
@@ -753,8 +789,15 @@ This file tracks the generated topics and subtopics for your academic research p
                 seen_citations.add(normalized)
                 unique_citations.append(citation)
             
-            # Sort citations alphabetically
-            unique_citations.sort(key=lambda x: re.sub(r'^\d+\.\s+', '', x).lower())
+            # Sort citations alphabetically by author
+            def get_author(citation):
+                # Extract author from citation
+                author_match = re.search(r'^\d+\.\s+([^(]+)', citation)
+                if author_match:
+                    return author_match.group(1).lower()
+                return citation.lower()
+            
+            unique_citations.sort(key=get_author)
             
             # Add citations to the references section
             for i, citation in enumerate(unique_citations, 1):
@@ -1231,7 +1274,53 @@ This file tracks the generated topics and subtopics for your academic research p
                 logger.error(f"Failed to extract text from PDF: {pdf_path}")
                 return None
             
-            # Create a prompt for the Gemini model
+            # First, ask the LLM to extract citation information from the PDF
+            citation_prompt = f"""
+            You are an academic citation expert. Extract citation information from this academic paper.
+            
+            Please analyze the following text and extract:
+            1. Full author names (all authors if possible)
+            2. Publication year
+            3. Complete title
+            4. Journal or conference name (if applicable)
+            5. Volume, issue, pages (if applicable)
+            6. DOI or URL (if present)
+            7. Publisher information (if present)
+            
+            Format your response as a structured JSON object with these fields.
+            If you cannot find certain information, provide your best estimate and mark it as [inferred].
+            
+            First few paragraphs from the paper:
+            {text[:5000]}
+            
+            Last few paragraphs from the paper (may contain references):
+            {text[-5000:]}
+            """
+            
+            # Generate citation information using the Gemini model
+            try:
+                citation_response = self._api_call_with_retry(
+                    lambda: self.model.generate_content(citation_prompt).text
+                )
+                
+                # Parse the citation information
+                import json
+                try:
+                    citation_info = json.loads(citation_response)
+                except json.JSONDecodeError:
+                    # If the response is not valid JSON, extract structured information manually
+                    citation_info = self._extract_citation_from_text(citation_response)
+            except Exception as e:
+                logger.warning(f"Error extracting citation information: {str(e)}")
+                citation_info = {
+                    "authors": "[Author(s) unknown]",
+                    "year": "[Year unknown]",
+                    "title": os.path.basename(pdf_path).replace('.pdf', ''),
+                    "source": "[Source unknown]",
+                    "inferred": True
+                }
+            
+            # Create a prompt for the Gemini model to extract content
             prompt = f"""
             Extract relevant information from this academic paper for a research on the following topic and subtopic:
             
@@ -1246,6 +1335,9 @@ This file tracks the generated topics and subtopics for your academic research p
             
             Format your response as a structured markdown document with appropriate headings.
             
+            IMPORTANT: When referring to information from this paper, use proper in-text citations.
+            This paper should be cited as: ({citation_info.get('authors', '').split(',')[0] if ',' in citation_info.get('authors', '') else citation_info.get('authors', '').split(' ')[0]}, {citation_info.get('year', '[Year unknown]')})
+            
             Text from the paper:
             {text[:10000]}  # Limit text to 10,000 characters to avoid token limits
             """
@@ -1255,10 +1347,11 @@ This file tracks the generated topics and subtopics for your academic research p
                 lambda: self.model.generate_content(prompt).text
             )
             
-            # Create the content dictionary
+            # Create the content dictionary with citation information
             content = {
                 "source": os.path.basename(pdf_path),
-                "content": response
+                "content": response,
+                "citation": citation_info
             }
             
             return content
@@ -1267,36 +1360,50 @@ This file tracks the generated topics and subtopics for your academic research p
             logger.error(f"Error extracting content from PDF: {str(e)}")
             return None
     
-    def _extract_text_from_pdf(self, pdf_content: bytes) -> Optional[str]:
+    def _extract_citation_from_text(self, text: str) -> Dict[str, Any]:
         """
-        Extract text from a PDF.
+        Extract citation information from text when JSON parsing fails.
         
         Args:
-            pdf_content: The PDF content as bytes
+            text: The text containing citation information
             
         Returns:
-            Optional[str]: The extracted text, or None if extraction failed
+            Dict[str, Any]: The extracted citation information
         """
-        try:
-            # Try to import PyPDF2
-            import PyPDF2
-            from PyPDF2 import PdfReader
-            
-            # Create a BytesIO object from the PDF content
-            pdf_file = BytesIO(pdf_content)
-            
-            # Extract text with PyPDF2
-            reader = PdfReader(pdf_file)
-            text = ""
-            
-            for page in reader.pages:
-                text += page.extract_text() + "\n\n"
-            
-            return text.strip()
-            
-        except Exception as e:
-            logger.error(f"Error extracting text from PDF: {str(e)}")
-            return None
+        citation_info = {
+            "authors": "[Author(s) unknown]",
+            "year": "[Year unknown]",
+            "title": "[Title unknown]",
+            "source": "[Source unknown]",
+            "inferred": True
+        }
+        
+        # Extract authors
+        author_match = re.search(r'authors?:?\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
+        if author_match:
+            citation_info["authors"] = author_match.group(1).strip()
+        
+        # Extract year
+        year_match = re.search(r'(?:year|publication year|published):?\s*(\d{4})', text, re.IGNORECASE)
+        if year_match:
+            citation_info["year"] = year_match.group(1).strip()
+        
+        # Extract title
+        title_match = re.search(r'title:?\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
+        if title_match:
+            citation_info["title"] = title_match.group(1).strip()
+        
+        # Extract source (journal, conference, etc.)
+        source_match = re.search(r'(?:journal|conference|source|publication):?\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
+        if source_match:
+            citation_info["source"] = source_match.group(1).strip()
+        
+        # Extract DOI if present
+        doi_match = re.search(r'doi:?\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
+        if doi_match:
+            citation_info["doi"] = doi_match.group(1).strip()
+        
+        return citation_info
     
     def _write_subtopic_file(self, file_path: str, topic: str, subtopic: str, contents: List[Dict[str, Any]]) -> None:
         """
@@ -1309,9 +1416,6 @@ This file tracks the generated topics and subtopics for your academic research p
             contents: The extracted content
         """
         try:
-            # Import academic formatter functions
-            from academic_formatter import extract_metadata_from_pdf, generate_academic_citations
-            
             with open(file_path, "w", encoding="utf-8") as f:
                 # Write the header
                 f.write(f"# {subtopic}\n\n")
@@ -1333,39 +1437,36 @@ This file tracks the generated topics and subtopics for your academic research p
                 # Process each source to create academic citations
                 for i, content in enumerate(contents, 1):
                     source_file = content["source"]
+                    citation_info = content.get("citation", {})
                     
-                    # Check if it's a PDF file path
-                    if source_file.lower().endswith('.pdf'):
-                        # Get the full path to the PDF
-                        pdf_dir = os.path.join(self.output_dir, "pdfs")
-                        pdf_path = os.path.join(pdf_dir, source_file)
+                    if citation_info and not isinstance(citation_info, str):
+                        # Format authors
+                        authors = citation_info.get('authors', 'Unknown')
                         
-                        if os.path.exists(pdf_path):
-                            # Extract metadata and create citation
-                            try:
-                                metadata = extract_metadata_from_pdf(pdf_path)
-                                
-                                # Format authors
-                                authors = metadata.get('authors', 'Unknown')
-                                
-                                # Format title
-                                title = metadata.get('title', source_file.replace('.pdf', ''))
-                                
-                                # Format year
-                                year = metadata.get('year', 'n.d.')
-                                
-                                # Create citation in APA format
-                                citation = f"{i}. {authors} ({year}). {title}."
-                                f.write(f"{citation}\n")
-                            except Exception as e:
-                                logger.warning(f"Error creating academic citation for {source_file}: {str(e)}")
-                                f.write(f"{i}. SOURCE: {source_file}\n")
+                        # Format title
+                        title = citation_info.get('title', source_file.replace('.pdf', ''))
+                        
+                        # Format year
+                        year = citation_info.get('year', 'n.d.')
+                        
+                        # Format source (journal, conference, etc.)
+                        source = citation_info.get('source', '')
+                        
+                        # Format DOI if present
+                        doi = citation_info.get('doi', '')
+                        doi_text = f" DOI: {doi}" if doi else ""
+                        
+                        # Create citation in APA format
+                        if source:
+                            citation = f"{i}. {authors} ({year}). {title}. {source}.{doi_text}"
                         else:
-                            f.write(f"{i}. SOURCE: {source_file}\n")
+                            citation = f"{i}. {authors} ({year}). {title}.{doi_text}"
+                        
+                        f.write(f"{citation}\n")
                     else:
-                        # For non-PDF sources, just use the source name
+                        # Fallback to basic citation if no structured info is available
                         f.write(f"{i}. SOURCE: {source_file}\n")
-                
+        
             logger.info(f"Wrote subtopic file: {file_path}")
             
         except Exception as e:
