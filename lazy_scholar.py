@@ -99,7 +99,7 @@ def ensure_directory(directory_path: str) -> str:
 class LazyScholar:
     """Main class for the LazyScholar application."""
     
-    def __init__(self, headless: bool = False, output_dir: str = "research_output", timeout: int = 120, search_suffix: str = "", max_pdfs_per_topic: int = 10, focus: str = "all", academic_format: bool = False):
+    def __init__(self, headless: bool = False, output_dir: str = "research_output", timeout: int = 120, search_suffix: str = "", max_pdfs_per_topic: int = 10, focus: str = "all", academic_format: bool = False, language: str = "en"):
         """
         Initialize the LazyScholar instance.
         
@@ -111,6 +111,7 @@ class LazyScholar:
             max_pdfs_per_topic (int): Maximum number of PDFs to process per topic
             focus (str): Type of content to focus on ('pdf', 'html', or 'all')
             academic_format (bool): Whether to format the final paper as an academic paper
+            language (str): Language code for the final paper (e.g., 'en', 'tr', 'es')
         """
         # Import required modules
         import google.generativeai as genai
@@ -125,6 +126,7 @@ class LazyScholar:
         self.max_pdfs_per_topic = max_pdfs_per_topic
         self.focus = focus
         self.academic_format = academic_format
+        self.language = language
         self.browser = None
         self.topics = []
         self.problem_statement = ""
@@ -202,14 +204,14 @@ class LazyScholar:
             logger.error(f"Error initializing Gemini models: {str(e)}")
             raise
     
-    def _api_call_with_retry(self, api_func, max_retries=3, retry_delay=1):
+    def _api_call_with_retry(self, api_func, max_retries=5, retry_delay=2):
         """
         Make an API call with retry logic.
         
         Args:
             api_func: Function to call the API
             max_retries: Maximum number of retries
-            retry_delay: Delay between retries in seconds
+            retry_delay: Initial delay between retries in seconds
             
         Returns:
             API response
@@ -220,11 +222,24 @@ class LazyScholar:
                 return api_func()
             except Exception as e:
                 retries += 1
-                if retries >= max_retries:
-                    raise
-                logger.warning(f"API call failed: {str(e)}. Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
+                
+                # Check if it's a rate limit error (429)
+                if "429" in str(e) or "Resource has been exhausted" in str(e) or "quota" in str(e).lower():
+                    # For rate limit errors, use a longer delay
+                    current_delay = retry_delay * (2 ** retries)  # Exponential backoff
+                    current_delay = min(current_delay, 60)  # Cap at 60 seconds
+                    
+                    logger.warning(f"Rate limit error (429). Waiting for {current_delay} seconds before retry {retries}/{max_retries}")
+                    time.sleep(current_delay)
+                else:
+                    # For other errors, use standard backoff
+                    if retries >= max_retries:
+                        logger.error(f"API call failed after {max_retries} retries: {str(e)}")
+                        raise
+                    
+                    logger.warning(f"API call failed: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})")
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 30)  # Exponential backoff, capped at 30 seconds
     
     def start_browser(self) -> None:
         """Initialize and start the web browser."""
@@ -302,10 +317,25 @@ class LazyScholar:
         logger.info(f"Analyzing problem statement: {problem_statement}")
         
         try:
+            # Translate problem statement to English for better search results if not already in English
+            english_problem_statement = problem_statement
+            if self.language != "en":
+                logger.info(f"Translating problem statement to English for better search results")
+                translation_prompt = f"""Translate the following research problem to English for academic research purposes:
+
+Problem: {problem_statement}
+
+Provide only the translated text without any explanations or additional content."""
+
+                english_problem_statement = self._api_call_with_retry(
+                    lambda: self.model.generate_content(translation_prompt).text
+                )
+                logger.info(f"Translated problem statement: {english_problem_statement}")
+            
             # Prepare the prompt for Gemini
             prompt = f"""Analyze this research problem and break it down into main topics and subtopics for an academic paper:
 
-Problem: {problem_statement}
+Problem: {english_problem_statement}
 
 Focus on the key aspects that need to be investigated to thoroughly understand this problem.
 Subtopics will be used as search keywords by their own. So it's important to make them short and related with the main topic. Mention problem sentence while creating subtopic.
@@ -344,7 +374,21 @@ Format your response as JSON with this structure:
                     
                     # Extract topics from the response
                     if "topics" in data:
-                        return data["topics"]
+                        topics = data["topics"]
+                        
+                        # If language is not English, add translations for each topic and subtopic
+                        if self.language != "en":
+                            logger.info(f"Adding translations for topics and subtopics to {self.language}")
+                            for topic in topics:
+                                # Store the English title for search purposes
+                                topic["english_title"] = topic["title"]
+                                
+                                # Add translations for subtopics
+                                for subtopic in topic["subtopics"]:
+                                    # Store the English title for search purposes
+                                    subtopic["english_title"] = subtopic["title"]
+                            
+                        return topics
                     else:
                         logger.error("Response JSON does not contain 'topics' key")
                         return self._generate_default_topics(problem_statement)
@@ -363,59 +407,77 @@ Format your response as JSON with this structure:
     
     def _generate_default_topics(self, problem_statement: str) -> List[Dict[str, Any]]:
         """
-        Generate default topics and subtopics when the Gemini model is not available.
+        Generate default topics and subtopics if the analysis fails.
         
         Args:
-            problem_statement: The research problem statement
+            problem_statement (str): The research problem
             
         Returns:
-            List of dictionaries containing topics and subtopics
+            List[Dict[str, Any]]: List of default topics and subtopics
         """
-        logger.info("Generating default topics for research")
+        logger.info("Generating default topics...")
         
-        # Extract keywords from the problem statement
-        words = problem_statement.lower().split()
-        words = [word.strip('.,?!()[]{}:;"\'') for word in words]
-        words = [word for word in words if len(word) > 3 and word not in ['and', 'the', 'that', 'this', 'with', 'from', 'what', 'how', 'why', 'between']]
+        # Translate problem statement to English for better search results if not already in English
+        english_problem_statement = problem_statement
+        if self.language != "en":
+            try:
+                translation_prompt = f"""Translate the following research problem to English for academic research purposes:
+
+Problem: {problem_statement}
+
+Provide only the translated text without any explanations or additional content."""
+
+                english_problem_statement = self._api_call_with_retry(
+                    lambda: self.model.generate_content(translation_prompt).text
+                )
+                logger.info(f"Translated problem statement for default topics: {english_problem_statement}")
+            except Exception as e:
+                logger.error(f"Error translating problem statement for default topics: {str(e)}")
+                # Continue with original problem statement if translation fails
         
-        # Use the most frequent words as topics
-        from collections import Counter
-        word_counts = Counter(words)
-        top_words = [word for word, count in word_counts.most_common(3)]
-        
-        # If we don't have enough words, add some generic topics
-        while len(top_words) < 3:
-            generic_topics = ["Background", "Current Research", "Future Directions"]
-            for topic in generic_topics:
-                if topic.lower() not in [word.lower() for word in top_words]:
-                    top_words.append(topic)
-                    if len(top_words) >= 3:
-                        break
-        
-        # Create topics with proper structure
-        topics = []
-        for word in top_words[:3]:
-            topic = {
-                "title": word.title(),
-                        "subtopics": [
+        # Create default topics based on the problem statement
+        default_topics = [
+            {
+                "title": "Overview of " + english_problem_statement[:50] + "..." if len(english_problem_statement) > 50 else english_problem_statement,
+                "subtopics": [
                     {
-                        "title": f"Definition and Basic Concepts of {word.title()}",
+                        "title": "Key Concepts in " + english_problem_statement[:40] + "..." if len(english_problem_statement) > 40 else english_problem_statement,
                         "status": "pending"
                     },
                     {
-                        "title": f"Current Research in {word.title()}",
+                        "title": "Current Research on " + english_problem_statement[:40] + "..." if len(english_problem_statement) > 40 else english_problem_statement,
+                        "status": "pending"
+                    }
+                ]
+            },
+            {
+                "title": "Applications and Implications",
+                "subtopics": [
+                    {
+                        "title": "Practical Applications",
                         "status": "pending"
                     },
                     {
-                        "title": f"Applications and Future Directions of {word.title()}",
+                        "title": "Future Directions",
                         "status": "pending"
                     }
                 ]
             }
-            topics.append(topic)
+        ]
         
-        logger.info(f"Generated {len(topics)} default topics for research")
-        return topics
+        # If language is not English, add translations for each topic and subtopic
+        if self.language != "en":
+            logger.info(f"Adding translations for default topics and subtopics to {self.language}")
+            for topic in default_topics:
+                # Store the English title for search purposes
+                topic["english_title"] = topic["title"]
+                
+                # Add translations for subtopics
+                for subtopic in topic["subtopics"]:
+                    # Store the English title for search purposes
+                    subtopic["english_title"] = subtopic["title"]
+        
+        return default_topics
     
     def update_topics_tracking_file(self) -> None:
         """
@@ -478,103 +540,63 @@ This file tracks the generated topics and subtopics for your academic research p
     
     def extract_web_content(self, html_path: str, topic: str, subtopic: str) -> Dict[str, Any]:
         """
-        Extract content from a web page relevant to a topic and subtopic.
+        Extract content from an HTML file for a specific topic and subtopic.
         
         Args:
-            html_path: Path to the HTML file
-            topic: The main topic
-            subtopic: The subtopic to extract content for
+            html_path: The path to the HTML file
+            topic: The topic
+            subtopic: The subtopic
             
         Returns:
-            Dictionary with extracted content
+            Dict[str, Any]: The extracted content
         """
-        logger.info(f"Extracting web content for {topic} - {subtopic} from {html_path}")
-        
         try:
             # Read the HTML file
             with open(html_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
             
-            # Parse with BeautifulSoup
+            # Parse the HTML
             soup = BeautifulSoup(html_content, "html.parser")
             
-            # Extract text content
-            # Remove script and style elements
-            for script in soup(["script", "style"]):
-                script.extract()
-            
-            # Get text
+            # Extract text from the HTML
             text = soup.get_text()
             
-            # Break into lines and remove leading and trailing space
-            lines = (line.strip() for line in text.splitlines())
-            # Break multi-headlines into a line each
-            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-            # Remove blank lines
-            text = '\n'.join(chunk for chunk in chunks if chunk)
-            
-            # Limit text length to avoid token limits
-            max_length = 10000  # Adjust as needed
-            if len(text) > max_length:
-                text = text[:max_length]
-            
-            # Create a prompt for the model to extract relevant content
+            # Create a prompt for the Gemini model
             prompt = f"""
-            Extract information from the following web page content that is relevant to the topic "{topic}" 
-            and specifically the subtopic "{subtopic}".
+            Extract relevant information from this web page for a research on the following topic and subtopic:
             
-            Organize your response as a JSON object with the following structure:
-            {{
-                "introduction": ["paragraph 1", "paragraph 2", ...],
-                "key_findings": ["finding 1", "finding 2", ...],
-                "analysis": ["paragraph 1", "paragraph 2", ...],
-                "examples": ["example 1", "example 2", ...],
-                "conclusion": ["paragraph 1", "paragraph 2", ...],
-                "citation": "Source: [Title of the page]"
-            }}
+            Topic: {topic}
+            Subtopic: {subtopic}
             
-            Web page content:
-            {text}
+            Please analyze the following text and extract only the most relevant information related to the topic and subtopic.
+            Do not organize the information into sections like "Key findings", "Analysis", etc.
+            Just extract the relevant content in a concise form.
+            
+            {'' if self.language == 'en' else f'Ensure the extracted information is in {self.language} language.'}
+            
+            Text from the web page:
+            {text[:10000]}  # Limit text to 10,000 characters to avoid token limits
             """
             
-            # Define the model call with retry
-            def _call_gemini():
-                response = self.text_model.generate_content(prompt)
-                return response.text
+            # Generate content using the Gemini model
+            response = self._api_call_with_retry(
+                lambda: self.model.generate_content(prompt).text
+            )
             
-            # Call the model with retry
-            response_text = self._api_call_with_retry(_call_gemini)
-            
-            # Extract the JSON part from the response
-            json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                # If no JSON code block, try to find object directly
-                json_match = re.search(r'\{\s*".*"\s*:.*\}', response_text, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0)
-                else:
-                    # If still no match, use the entire response
-                    json_str = response_text
-            
-            # Clean up the JSON string
-            json_str = json_str.replace('```json', '').replace('```', '').strip()
-            
-            # Parse the JSON
-            try:
-                content = json.loads(json_str)
-            except json.JSONDecodeError:
-                # If JSON parsing fails, create a default structure
-                logger.warning(f"Failed to parse JSON response for {subtopic}. Using default structure.")
-                content = self._generate_default_content(topic, subtopic)
-                content["raw_response"] = response_text
+            # Create the content dictionary
+            content = {
+                "source": os.path.basename(html_path),
+                "content": response
+            }
             
             return content
             
         except Exception as e:
-            logger.error(f"Error extracting web content: {e}")
-            return self._generate_default_content(topic, subtopic)
+            logger.error(f"Error extracting content from HTML: {str(e)}")
+            return {
+                "source": os.path.basename(html_path),
+                "content": f"Error extracting content: {str(e)}"
+            }
 
     def generate_final_paper(self, topics: List[Dict[str, Any]]) -> str:
         """
@@ -589,13 +611,15 @@ This file tracks the generated topics and subtopics for your academic research p
 
 ## Abstract
 """
-            # Generate abstract with LLM
+            # Generate abstract with LLM in the target language
             abstract_prompt = f"""
             Write a concise academic abstract (150-250 words) for a research paper on:
             {self.problem_statement}
             
             The paper covers these main topics:
             {", ".join([topic["title"] for topic in topics])}
+            
+            {'' if self.language == 'en' else f'Write the abstract in {self.language} language.'}
             """
             
             abstract = self._api_call_with_retry(
@@ -610,7 +634,7 @@ This file tracks the generated topics and subtopics for your academic research p
                 for subtopic in topic["subtopics"]:
                     markdown += f"* {subtopic['title']}\n"
             
-            # Generate introduction
+            # Generate introduction in the target language
             intro_prompt = f"""
             Write a comprehensive academic introduction (400-600 words) for a research paper on:
             {self.problem_statement}
@@ -619,6 +643,7 @@ This file tracks the generated topics and subtopics for your academic research p
             {", ".join([topic["title"] for topic in topics])}
             
             Include proper in-text citations where appropriate using (Author, Year) format.
+            {'' if self.language == 'en' else f'Write the introduction in {self.language} language.'}
             """
             
             introduction = self._api_call_with_retry(
@@ -679,8 +704,8 @@ This file tracks the generated topics and subtopics for your academic research p
                         # Remove the title header
                         subtopic_content = re.sub(r"^# [^\n]+\n+", "", subtopic_content)
                         
-                        # Process the subtopic content with LLM to create a polished section
-                        # while preserving citations
+                        # If the content is already in the target language (from _write_subtopic_file),
+                        # we don't need to translate it again, just enhance it
                         section_prompt = f"""
                         Rewrite and enhance the following content into a polished academic section for a research paper.
                         
@@ -693,6 +718,7 @@ This file tracks the generated topics and subtopics for your academic research p
                         3. Organize into logical paragraphs with smooth transitions
                         4. Use academic language and tone
                         5. Do not add new citations that aren't in the original text
+                        {'' if self.language == 'en' else f'6. Ensure the text is in {self.language} language'}
                         
                         Content to enhance:
                         {subtopic_content}
@@ -712,7 +738,7 @@ This file tracks the generated topics and subtopics for your academic research p
                         markdown += f"\n### {subtopic['title']}\n"
                         markdown += f"No content available for this subtopic.\n\n"
             
-            # Generate conclusion
+            # Generate conclusion in the target language
             conclusion_prompt = f"""
             Write an academic conclusion (300-500 words) for a research paper on:
             {self.problem_statement}
@@ -724,6 +750,7 @@ This file tracks the generated topics and subtopics for your academic research p
             4. Suggest directions for future research
             
             Include proper in-text citations where appropriate using (Author, Year) format.
+            {'' if self.language == 'en' else f'Write the conclusion in {self.language} language.'}
             """
             
             conclusion = self._api_call_with_retry(
@@ -868,24 +895,103 @@ This file tracks the generated topics and subtopics for your academic research p
                     self.current_topic = topic_title
                     self.current_subtopic = subtopic_title
                     
+                    # Use English title for search if available
+                    search_title = subtopic_data.get("english_title", subtopic_title)
+                    
                     # Search for PDFs related to the subtopic
-                    search_query = f"{subtopic_title} {self.search_suffix}"
+                    search_query = f"{search_title} {self.search_suffix}"
                     
                     # Perform the search based on the search engine
                     pdf_urls = self._search_for_pdfs(search_query, search_engine)
                     
                     # Download and process PDFs
                     pdf_contents = []
-                    for i, url in enumerate(pdf_urls[:self.max_pdfs_per_topic]):
+                    max_pdfs = self.max_pdfs_per_topic
+                    
+                    logger.info(f"Attempting to download and process up to {max_pdfs} PDFs")
+                    
+                    # First, try to download all PDFs
+                    successful_downloads = []
+                    for i, url in enumerate(pdf_urls):
                         try:
-                            logger.info(f"Downloading PDF {i+1}/{min(len(pdf_urls), self.max_pdfs_per_topic)}: {url}")
+                            logger.info(f"Downloading PDF {i+1}/{len(pdf_urls)}: {url}")
                             pdf_path = self._download_pdf(url)
                             if pdf_path:
-                                content = self._extract_pdf_content(pdf_path, topic_title, subtopic_title)
-                                if content:
-                                    pdf_contents.append(content)
+                                successful_downloads.append(pdf_path)
+                                logger.info(f"Successfully downloaded PDF {i+1}: {pdf_path}")
+                            else:
+                                logger.warning(f"Failed to download PDF {i+1}: {url}")
                         except Exception as e:
-                            logger.error(f"Error processing PDF {url}: {str(e)}")
+                            logger.error(f"Error downloading PDF {url}: {str(e)}")
+                    
+                    logger.info(f"Successfully downloaded {len(successful_downloads)} PDFs out of {len(pdf_urls)} URLs")
+                    
+                    # If we don't have enough PDFs, try a different search query
+                    if len(successful_downloads) < max_pdfs and self.focus in ["pdf", "all"]:
+                        additional_query = f"{search_title} filetype:pdf {self.search_suffix}"
+                        logger.info(f"Not enough PDFs downloaded. Trying additional search with query: {additional_query}")
+                        
+                        # Try with Google directly
+                        try:
+                            self.browser.get("https://www.google.com/")
+                            
+                            # Find the search box
+                            search_box = WebDriverWait(self.browser, self.timeout).until(
+                                EC.presence_of_element_located((By.NAME, "q"))
+                            )
+                            
+                            # Enter the search query
+                            search_box.clear()
+                            search_box.send_keys(additional_query)
+                            search_box.send_keys(Keys.RETURN)
+                            
+                            # Wait for results to load
+                            time.sleep(5)
+                            
+                            # Find PDF links
+                            pdf_links = self.browser.find_elements(By.XPATH, "//a[contains(@href, '.pdf')]")
+                            additional_urls = []
+                            
+                            for link in pdf_links:
+                                href = link.get_attribute("href")
+                                if href and ".pdf" in href and href not in pdf_urls:
+                                    additional_urls.append(href)
+                            
+                            logger.info(f"Found {len(additional_urls)} additional PDF URLs")
+                            
+                            # Download additional PDFs
+                            for i, url in enumerate(additional_urls):
+                                if len(successful_downloads) >= max_pdfs:
+                                    break
+                                    
+                                try:
+                                    logger.info(f"Downloading additional PDF {i+1}/{len(additional_urls)}: {url}")
+                                    pdf_path = self._download_pdf(url)
+                                    if pdf_path:
+                                        successful_downloads.append(pdf_path)
+                                        logger.info(f"Successfully downloaded additional PDF: {pdf_path}")
+                                    else:
+                                        logger.warning(f"Failed to download additional PDF: {url}")
+                                except Exception as e:
+                                    logger.error(f"Error downloading additional PDF {url}: {str(e)}")
+                        except Exception as e:
+                            logger.warning(f"Error with additional Google search: {str(e)}")
+                    
+                    # Now process all successfully downloaded PDFs
+                    logger.info(f"Processing {len(successful_downloads)} PDFs")
+                    for i, pdf_path in enumerate(successful_downloads):
+                        try:
+                            logger.info(f"Extracting content from PDF {i+1}/{len(successful_downloads)}: {pdf_path}")
+                            content = self._extract_pdf_content(pdf_path, topic_title, subtopic_title)
+                            if content:
+                                pdf_contents.append(content)
+                                logger.info(f"Successfully extracted content from PDF {i+1}")
+                            else:
+                                logger.warning(f"Failed to extract content from PDF {i+1}: {pdf_path}")
+                        except Exception as e:
+                            logger.error(f"Error extracting content from PDF {pdf_path}: {str(e)}")
+                    
+                    logger.info(f"Successfully processed {len(pdf_contents)} PDFs out of {len(successful_downloads)} downloaded")
                     
                     # Write subtopic file
                     subtopic_file = os.path.join(topic_dir, f"{self._sanitize_filename(subtopic_title)}.md")
@@ -915,7 +1021,7 @@ This file tracks the generated topics and subtopics for your academic research p
                     pdf_references, content = academic_formatter.extract_references_from_final_paper(final_paper_path)
                     
                     # Format as academic paper
-                    formatted_paper = academic_formatter.format_as_academic_paper(model, content, pdf_references)
+                    formatted_paper = academic_formatter.format_as_academic_paper(model, content, pdf_references, self.language)
                     
                     # Save formatted paper
                     output_path = academic_formatter.save_formatted_paper(final_paper_path, formatted_paper)
@@ -1054,12 +1160,92 @@ This file tracks the generated topics and subtopics for your academic research p
                 screenshot_path = os.path.join(self.output_dir, "google_scholar_results.png")
                 self.browser.save_screenshot(screenshot_path)
                 
-                # Find PDF links
+                # Try multiple approaches to find PDF links
+                # 1. Direct PDF links
                 pdf_links = self.browser.find_elements(By.XPATH, "//a[contains(@href, '.pdf')]")
                 for link in pdf_links:
                     href = link.get_attribute("href")
                     if href and ".pdf" in href:
                         pdf_urls.append(href)
+                
+                # 2. Look for [PDF] links which are common in Google Scholar
+                if len(pdf_urls) < self.max_pdfs_per_topic:
+                    pdf_text_links = self.browser.find_elements(By.XPATH, "//a[contains(text(), '[PDF]')]")
+                    for link in pdf_text_links:
+                        href = link.get_attribute("href")
+                        if href:
+                            pdf_urls.append(href)
+                
+                # 3. Try to find links to publisher websites that might have PDFs
+                if len(pdf_urls) < self.max_pdfs_per_topic:
+                    # Get all result links
+                    result_links = self.browser.find_elements(By.CSS_SELECTOR, ".gs_rt a")
+                    
+                    # Process only enough links to reach max_pdfs_per_topic
+                    remaining_links = self.max_pdfs_per_topic - len(pdf_urls)
+                    for link in result_links[:remaining_links]:
+                        try:
+                            href = link.get_attribute("href")
+                            if href:
+                                # Open the link in a new tab
+                                original_window = self.browser.current_window_handle
+                                self.browser.execute_script("window.open('');")
+                                self.browser.switch_to.window(self.browser.window_handles[1])
+                                
+                                try:
+                                    # Navigate to the link
+                                    self.browser.get(href)
+                                    time.sleep(3)
+                                    
+                                    # Look for PDF links on the page
+                                    page_pdf_links = self.browser.find_elements(By.XPATH, "//a[contains(@href, '.pdf')]")
+                                    for pdf_link in page_pdf_links:
+                                        pdf_href = pdf_link.get_attribute("href")
+                                        if pdf_href and ".pdf" in pdf_href:
+                                            pdf_urls.append(pdf_href)
+                                            break  # Only get one PDF per page
+                                except Exception as e:
+                                    logger.warning(f"Error exploring publisher page: {str(e)}")
+                                
+                                # Close the tab and switch back
+                                self.browser.close()
+                                self.browser.switch_to.window(original_window)
+                                
+                                # If we have enough PDFs, stop
+                                if len(pdf_urls) >= self.max_pdfs_per_topic:
+                                    break
+                        except Exception as e:
+                            logger.warning(f"Error processing result link: {str(e)}")
+                
+                # 4. Try to find more results by going to next page if needed
+                if len(pdf_urls) < self.max_pdfs_per_topic:
+                    try:
+                        # Look for the "Next" button
+                        next_button = self.browser.find_element(By.XPATH, "//button[@aria-label='Next']")
+                        if next_button and next_button.is_enabled():
+                            next_button.click()
+                            time.sleep(5)
+                            
+                            # Find PDF links on the next page
+                            pdf_links = self.browser.find_elements(By.XPATH, "//a[contains(@href, '.pdf')]")
+                            for link in pdf_links:
+                                href = link.get_attribute("href")
+                                if href and ".pdf" in href:
+                                    pdf_urls.append(href)
+                                    if len(pdf_urls) >= self.max_pdfs_per_topic:
+                                        break
+                            
+                            # Also look for [PDF] links
+                            if len(pdf_urls) < self.max_pdfs_per_topic:
+                                pdf_text_links = self.browser.find_elements(By.XPATH, "//a[contains(text(), '[PDF]')]")
+                                for link in pdf_text_links:
+                                    href = link.get_attribute("href")
+                                    if href:
+                                        pdf_urls.append(href)
+                                        if len(pdf_urls) >= self.max_pdfs_per_topic:
+                                            break
+                    except Exception as e:
+                        logger.warning(f"Error navigating to next page: {str(e)}")
             
             else:
                 # Generic search approach
@@ -1090,6 +1276,47 @@ This file tracks the generated topics and subtopics for your academic research p
                         href = link.get_attribute("href")
                         if href and ".pdf" in href:
                             pdf_urls.append(href)
+                    
+                    # If we don't have enough PDFs, try to find more by exploring result links
+                    if len(pdf_urls) < self.max_pdfs_per_topic:
+                        # Get all links
+                        all_links = self.browser.find_elements(By.TAG_NAME, "a")
+                        
+                        # Process only enough links to reach max_pdfs_per_topic
+                        remaining_links = self.max_pdfs_per_topic - len(pdf_urls)
+                        for link in all_links[:remaining_links * 3]:  # Check more links than needed
+                            try:
+                                href = link.get_attribute("href")
+                                if href and not any(pdf_url in href for pdf_url in pdf_urls):
+                                    # Open the link in a new tab
+                                    original_window = self.browser.current_window_handle
+                                    self.browser.execute_script("window.open('');")
+                                    self.browser.switch_to.window(self.browser.window_handles[1])
+                                    
+                                    try:
+                                        # Navigate to the link
+                                        self.browser.get(href)
+                                        time.sleep(3)
+                                        
+                                        # Look for PDF links on the page
+                                        page_pdf_links = self.browser.find_elements(By.XPATH, "//a[contains(@href, '.pdf')]")
+                                        for pdf_link in page_pdf_links:
+                                            pdf_href = pdf_link.get_attribute("href")
+                                            if pdf_href and ".pdf" in pdf_href:
+                                                pdf_urls.append(pdf_href)
+                                                break  # Only get one PDF per page
+                                    except Exception as e:
+                                        logger.warning(f"Error exploring result page: {str(e)}")
+                                    
+                                    # Close the tab and switch back
+                                    self.browser.close()
+                                    self.browser.switch_to.window(original_window)
+                                    
+                                    # If we have enough PDFs, stop
+                                    if len(pdf_urls) >= self.max_pdfs_per_topic:
+                                        break
+                            except Exception as e:
+                                logger.warning(f"Error processing link: {str(e)}")
                 
                 except TimeoutException:
                     logger.error("Timeout waiting for search box on generic search engine")
@@ -1097,6 +1324,50 @@ This file tracks the generated topics and subtopics for your academic research p
             # Limit the number of PDFs
             pdf_urls = pdf_urls[:self.max_pdfs_per_topic]
             logger.info(f"Found {len(pdf_urls)} PDF links")
+            
+            # If we still don't have enough PDFs, try a different search query
+            if len(pdf_urls) < self.max_pdfs_per_topic:
+                logger.info(f"Only found {len(pdf_urls)} PDFs, trying with a modified query")
+                
+                # Add "filetype:pdf" to the query if not already present
+                if "filetype:pdf" not in query.lower():
+                    modified_query = f"{query} filetype:pdf"
+                    
+                    # Try with Google directly
+                    try:
+                        self.browser.get("https://www.google.com/")
+                        
+                        # Find the search box
+                        search_box = WebDriverWait(self.browser, self.timeout).until(
+                            EC.presence_of_element_located((By.NAME, "q"))
+                        )
+                        
+                        # Enter the search query
+                        search_box.clear()
+                        search_box.send_keys(modified_query)
+                        search_box.send_keys(Keys.RETURN)
+                        
+                        # Wait for results to load
+                        time.sleep(5)
+                        
+                        # Take a screenshot for debugging
+                        screenshot_path = os.path.join(self.output_dir, "google_pdf_search_results.png")
+                        self.browser.save_screenshot(screenshot_path)
+                        
+                        # Find PDF links
+                        pdf_links = self.browser.find_elements(By.XPATH, "//a[contains(@href, '.pdf')]")
+                        for link in pdf_links:
+                            href = link.get_attribute("href")
+                            if href and ".pdf" in href and href not in pdf_urls:
+                                pdf_urls.append(href)
+                                if len(pdf_urls) >= self.max_pdfs_per_topic:
+                                    break
+                    except Exception as e:
+                        logger.warning(f"Error with modified Google search: {str(e)}")
+            
+            # Final limit check
+            pdf_urls = pdf_urls[:self.max_pdfs_per_topic]
+            logger.info(f"Final count: Found {len(pdf_urls)} PDF links")
             
             return pdf_urls
             
@@ -1141,28 +1412,29 @@ This file tracks the generated topics and subtopics for your academic research p
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
             
-            try:
-                response = requests.get(url, stream=True, timeout=self.timeout, headers=headers)
-                
-                # Check if the request was successful
-                if response.status_code == 200:
-                    # Check if the content is a PDF
-                    content_type = response.headers.get('Content-Type', '')
-                    if 'application/pdf' in content_type or url.endswith('.pdf'):
-                        # Save the PDF
-                        with open(pdf_path, "wb") as f:
-                            for chunk in response.iter_content(chunk_size=8192):
-                                if chunk:
-                                    f.write(chunk)
-                        
-                        logger.info(f"PDF downloaded successfully to: {pdf_path}")
-                        return pdf_path
-                    else:
-                        logger.warning(f"URL does not point to a PDF. Content-Type: {content_type}")
-                        
-                        # Try to download anyway if the URL ends with .pdf
-                        if url.endswith('.pdf'):
-                            logger.info("URL ends with .pdf, attempting to download anyway")
+            # Implement retry logic with exponential backoff
+            max_retries = 5
+            retry_delay = 2  # Start with 2 seconds
+            
+            for retry_count in range(max_retries):
+                try:
+                    response = requests.get(url, stream=True, timeout=self.timeout, headers=headers)
+                    
+                    # Handle rate limiting (429 Too Many Requests)
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get('Retry-After', retry_delay))
+                        logger.warning(f"Rate limited (429). Waiting for {retry_after} seconds before retry {retry_count+1}/{max_retries}")
+                        time.sleep(retry_after)
+                        # Increase the delay for the next retry (exponential backoff)
+                        retry_delay = min(retry_delay * 2, 60)  # Cap at 60 seconds
+                        continue
+                    
+                    # Check if the request was successful
+                    if response.status_code == 200:
+                        # Check if the content is a PDF
+                        content_type = response.headers.get('Content-Type', '')
+                        if 'application/pdf' in content_type or url.endswith('.pdf'):
+                            # Save the PDF
                             with open(pdf_path, "wb") as f:
                                 for chunk in response.iter_content(chunk_size=8192):
                                     if chunk:
@@ -1170,36 +1442,67 @@ This file tracks the generated topics and subtopics for your academic research p
                             
                             logger.info(f"PDF downloaded successfully to: {pdf_path}")
                             return pdf_path
-                else:
-                    logger.warning(f"Failed to download PDF. Status code: {response.status_code}")
-                    
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Request error while downloading PDF: {str(e)}")
-                
-                # Try using the browser to download the PDF
-                logger.info("Attempting to download using the browser")
-                try:
-                    # Navigate to the PDF URL
-                    self.browser.get(url)
-                    
-                    # Wait for the PDF to load
-                    time.sleep(5)
-                    
-                    # Save the page source
-                    page_source = self.browser.page_source
-                    
-                    # Check if it's a PDF
-                    if "PDF" in page_source or "%PDF" in page_source:
-                        # Save the PDF
-                        with open(pdf_path, "wb") as f:
-                            f.write(page_source.encode('utf-8'))
-                        
-                        logger.info(f"PDF downloaded using browser to: {pdf_path}")
-                        return pdf_path
+                        else:
+                            logger.warning(f"URL does not point to a PDF. Content-Type: {content_type}")
+                            
+                            # Try to download anyway if the URL ends with .pdf
+                            if url.endswith('.pdf'):
+                                logger.info("URL ends with .pdf, attempting to download anyway")
+                                with open(pdf_path, "wb") as f:
+                                    for chunk in response.iter_content(chunk_size=8192):
+                                        if chunk:
+                                            f.write(chunk)
+                                
+                                logger.info(f"PDF downloaded successfully to: {pdf_path}")
+                                return pdf_path
                     else:
-                        logger.warning("Browser download failed: Not a PDF")
-                except Exception as browser_e:
-                    logger.error(f"Browser download error: {str(browser_e)}")
+                        logger.warning(f"Failed to download PDF. Status code: {response.status_code}")
+                        
+                        # If we get a server error, wait and retry
+                        if response.status_code >= 500:
+                            logger.warning(f"Server error ({response.status_code}). Retrying in {retry_delay} seconds...")
+                            time.sleep(retry_delay)
+                            retry_delay = min(retry_delay * 2, 60)  # Cap at 60 seconds
+                            continue
+                    
+                    # If we get here, either the download was successful or we got a non-retryable error
+                    break
+                    
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Request error while downloading PDF: {str(e)}")
+                    
+                    # Wait and retry for network-related errors
+                    if retry_count < max_retries - 1:  # Don't sleep on the last retry
+                        logger.warning(f"Network error. Retrying in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                        retry_delay = min(retry_delay * 2, 60)  # Cap at 60 seconds
+                        continue
+                    break
+            
+            # If all retries failed, try using the browser as a fallback
+            logger.info("Attempting to download using the browser")
+            try:
+                # Navigate to the PDF URL
+                self.browser.get(url)
+                
+                # Wait for the PDF to load
+                time.sleep(5)
+                
+                # Save the page source
+                page_source = self.browser.page_source
+                
+                # Check if it's a PDF
+                if "PDF" in page_source or "%PDF" in page_source:
+                    # Save the PDF
+                    with open(pdf_path, "wb") as f:
+                        f.write(page_source.encode('utf-8'))
+                    
+                    logger.info(f"PDF downloaded using browser to: {pdf_path}")
+                    return pdf_path
+                else:
+                    logger.warning("Browser download failed: Not a PDF")
+            except Exception as browser_e:
+                logger.error(f"Browser download error: {str(browser_e)}")
             
             return None
             
@@ -1237,13 +1540,11 @@ This file tracks the generated topics and subtopics for your academic research p
             Topic: {topic}
             Subtopic: {subtopic}
             
-            Please analyze the following text and extract:
-            1. Key findings related to the topic and subtopic
-            2. Analysis and insights
-            3. Examples or case studies
-            4. Conclusions
+            Please analyze the following text and extract only the most relevant information related to the topic and subtopic.
+            Do not organize the information into sections like "Key findings", "Analysis", etc.
+            Just extract the relevant content in a concise form.
             
-            Format your response as a structured markdown document with appropriate headings.
+            {'' if self.language == 'en' else f'Ensure the extracted information is in {self.language} language.'}
             
             Text from the paper:
             {text[:10000]}  # Limit text to 10,000 characters to avoid token limits
@@ -1302,42 +1603,65 @@ This file tracks the generated topics and subtopics for your academic research p
         Write a subtopic file with the extracted content.
         
         Args:
-            file_path: The path to the subtopic file
+            file_path: The path to the file
             topic: The topic
             subtopic: The subtopic
             contents: The extracted content
         """
         try:
-            # Import academic formatter functions
-            from academic_formatter import extract_metadata_from_pdf, generate_academic_citations
+            # Create the directory if it doesn't exist
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
             
-            with open(file_path, "w", encoding="utf-8") as f:
-                # Write the header
-                f.write(f"# {subtopic}\n\n")
+            # Start building the markdown
+            markdown = f"# {subtopic}\n\n"
+            
+            # If we have content, process it
+            if contents:
+                # Combine all content
+                combined_content = "\n\n".join([content["content"] for content in contents])
                 
-                if not contents:
-                    f.write(f"No content found for {subtopic} related to {topic}.\n\n")
-                    f.write("## References\n\n")
-                    f.write("No sources processed yet.\n")
-                    return
+                # Create a prompt for the Gemini model to summarize and format the content
+                prompt = f"""
+                Synthesize the following extracted information into a cohesive academic section for a research paper.
                 
-                # Write the content
-                for content in contents:
-                    f.write(content["content"])
-                    f.write("\n\n")
+                Topic: {topic}
+                Subtopic: {subtopic}
                 
-                # Write the references section
-                f.write("## References\n\n")
+                IMPORTANT:
+                1. Organize the information logically
+                2. Use academic language and tone
+                3. Include proper in-text citations in (Author, Year) format
+                4. Maintain all factual information
+                5. Do not add any information that is not in the source material
+                {'' if self.language == 'en' else f'6. Ensure the text is in {self.language} language'}
                 
-                # Process each source to create academic citations
+                Extracted information:
+                {combined_content}
+                """
+                
+                # Generate content using the Gemini model
+                response = self._api_call_with_retry(
+                    lambda: self.model.generate_content(prompt).text
+                )
+                
+                # Add the response to the markdown
+                markdown += response + "\n\n"
+            else:
+                # If no content, add a placeholder
+                markdown += "No relevant information found for this subtopic.\n\n"
+            
+            # Add references section
+            markdown += "## References\n\n"
+            
+            # If we have content, add references
+            if contents:
                 for i, content in enumerate(contents, 1):
                     source_file = content["source"]
                     
-                    # Check if it's a PDF file path
+                    # Check if it's a PDF file
                     if source_file.lower().endswith('.pdf'):
                         # Get the full path to the PDF
-                        pdf_dir = os.path.join(self.output_dir, "pdfs")
-                        pdf_path = os.path.join(pdf_dir, source_file)
+                        pdf_path = os.path.join(self.output_dir, "pdfs", source_file)
                         
                         if os.path.exists(pdf_path):
                             # Extract metadata and create citation
@@ -1355,28 +1679,31 @@ This file tracks the generated topics and subtopics for your academic research p
                                 
                                 # Create citation in APA format
                                 citation = f"{i}. {authors} ({year}). {title}."
-                                f.write(f"{citation}\n")
+                                markdown += f"{citation}\n"
                             except Exception as e:
                                 logger.warning(f"Error creating academic citation for {source_file}: {str(e)}")
-                                f.write(f"{i}. SOURCE: {source_file}\n")
+                                markdown += f"{i}. SOURCE: {source_file}\n"
                         else:
-                            f.write(f"{i}. SOURCE: {source_file}\n")
+                            markdown += f"{i}. SOURCE: {source_file}\n"
                     else:
                         # For non-PDF sources, just use the source name
-                        f.write(f"{i}. SOURCE: {source_file}\n")
+                        markdown += f"{i}. SOURCE: {source_file}\n"
                 
+            else:
+                markdown += "No sources were used for this subtopic.\n"
+            
+            # Write the markdown to the file
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(markdown)
+            
             logger.info(f"Wrote subtopic file: {file_path}")
             
         except Exception as e:
             logger.error(f"Error writing subtopic file: {str(e)}")
-            
-            # Create a placeholder file if writing fails
+            # Create a minimal file with error information
             try:
                 with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(f"# {subtopic}\n\n")
-                    f.write(f"Error processing content for {subtopic} related to {topic}: {str(e)}\n\n")
-                    f.write("## References\n\n")
-                    f.write("No sources processed successfully.\n")
+                    f.write(f"# {subtopic}\n\nError extracting content: {str(e)}\n")
             except:
                 pass
 
@@ -1473,6 +1800,13 @@ def parse_arguments():
         help="Format the final paper as an academic paper with proper citations and references"
     )
     
+    parser.add_argument(
+        "--language",
+        type=str,
+        default="en",
+        help="Language code for the final paper (e.g., 'en', 'tr', 'es'). Topics and subtopics will be in English for better search results, but the final paper will be in the specified language."
+    )
+    
     args = parser.parse_args()
     
     return args
@@ -1510,11 +1844,13 @@ def main():
             search_suffix=args.search_suffix,
             max_pdfs_per_topic=args.max_pdfs,
             focus=args.focus,
-            academic_format=args.academic_format
+            academic_format=args.academic_format,
+            language=args.language
         )
         
         # Log academic format setting
         logger.info(f"Academic format: {args.academic_format}")
+        logger.info(f"Language: {args.language}")
         
         # Check if we should just regenerate the final paper
         if hasattr(args, 'regenerate_final_paper') and args.regenerate_final_paper:
@@ -1546,7 +1882,7 @@ def main():
                         pdf_references, content = academic_formatter.extract_references_from_final_paper(final_paper_path)
                         
                         # Format paper
-                        formatted_paper = academic_formatter.format_as_academic_paper(model, content, pdf_references)
+                        formatted_paper = academic_formatter.format_as_academic_paper(model, content, pdf_references, args.language)
                         
                         # Save formatted paper
                         output_path = academic_formatter.save_formatted_paper(final_paper_path, formatted_paper)

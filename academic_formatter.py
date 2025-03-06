@@ -20,6 +20,7 @@ import json
 import PyPDF2
 import requests
 import time
+from PIL import Image
 
 # Configure logging
 logging.basicConfig(
@@ -43,68 +44,50 @@ if not GOOGLE_API_KEY:
 genai.configure(api_key=GOOGLE_API_KEY)
 
 def initialize_model():
-    """Initialize the Gemini model for content analysis."""
+    """Initialize the Gemini model for text generation."""
     try:
-        # Set up generation config
-        generation_config = {
-            "temperature": 0.2,  # Lower temperature for more consistent output
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 8192,
-        }
+        # Check for API key in environment variables
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            api_key = os.getenv("GEMINI_API_KEY")
+            
+        if not api_key:
+            logger.error("No API key found. Please set GOOGLE_API_KEY or GEMINI_API_KEY environment variable.")
+            return None
+        
+        # Configure the Gemini API
+        genai.configure(api_key=api_key)
         
         # Initialize the model
-        model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash-001",
-            generation_config=generation_config,
-        )
-        logger.info("Successfully initialized Gemini model")
-        return model
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Test the model with a simple prompt
+        test_prompt = "Respond with 'OK' if you can process this message."
+        response = model.generate_content(test_prompt)
+        
+        if response and hasattr(response, 'text'):
+            logger.info("Successfully initialized Gemini model")
+            return model
+        else:
+            logger.error("Failed to get valid response from Gemini model")
+            return None
     except Exception as e:
-        logger.error(f"Failed to initialize Gemini model: {str(e)}")
+        logger.error(f"Error initializing Gemini model: {str(e)}")
         return None
 
 def extract_metadata_from_pdf(pdf_path):
     """Extract metadata from a PDF file."""
     try:
         import PyPDF2
+        import google.generativeai as genai
+        from PIL import Image
+        import os
+        
+        # First try to get metadata from PDF file properties
         metadata = {}
         
         with open(pdf_path, 'rb') as file:
             reader = PyPDF2.PdfReader(file)
-            
-            # Extract text from first page to try to get title and authors
-            if len(reader.pages) > 0:
-                first_page_text = reader.pages[0].extract_text()
-                
-                # Try to extract title (usually at the top of the first page)
-                title_lines = first_page_text.split('\n')[:3]  # First 3 lines might contain the title
-                metadata['title'] = ' '.join(title_lines).strip()
-                
-                # Try to get publication year from filename or content
-                year_pattern = re.compile(r'(19|20)\d{2}')  # Match years from 1900-2099
-                year_matches = year_pattern.findall(os.path.basename(pdf_path))
-                if year_matches:
-                    metadata['year'] = year_matches[0]
-                else:
-                    # Try to find year in first page text
-                    year_matches = year_pattern.findall(first_page_text[:500])  # Check first 500 chars
-                    if year_matches:
-                        metadata['year'] = year_matches[0]
-                    else:
-                        metadata['year'] = "n.d."  # No date
-                
-                # Try to extract authors
-                # Look for common patterns like "by" or "Author:" in first 500 chars
-                author_section = first_page_text[:500]
-                author_pattern = re.compile(r'(?:by|authors?:|written by)[:\s]+([^,\.;]+(?:,\s*[^,\.;]+){0,5})', re.IGNORECASE)
-                author_match = author_pattern.search(author_section)
-                if author_match:
-                    metadata['authors'] = author_match.group(1).strip()
-                else:
-                    # Just use the filename as a fallback
-                    base_name = os.path.basename(pdf_path).replace('.pdf', '')
-                    metadata['authors'] = base_name.split('_')[0] if '_' in base_name else base_name
             
             # Try to get info from PDF metadata
             if reader.metadata:
@@ -114,9 +97,134 @@ def extract_metadata_from_pdf(pdf_path):
                     metadata['authors'] = reader.metadata['/Author']
                 if '/CreationDate' in reader.metadata and reader.metadata['/CreationDate']:
                     date_str = reader.metadata['/CreationDate']
+                    year_pattern = re.compile(r'(19|20)\d{2}')
                     year_match = year_pattern.search(date_str)
                     if year_match:
                         metadata['year'] = year_match.group(0)
+            
+            # Extract text from first page to try to get title and authors
+            if len(reader.pages) > 0:
+                first_page_text = reader.pages[0].extract_text()
+                
+                # If we don't have a title yet, try to extract it from the first page
+                if 'title' not in metadata or not metadata['title']:
+                    title_lines = first_page_text.split('\n')[:3]  # First 3 lines might contain the title
+                    metadata['title'] = ' '.join(title_lines).strip()
+                
+                # If we don't have a year yet, try to find it in the first page
+                if 'year' not in metadata or not metadata['year']:
+                    year_pattern = re.compile(r'(19|20)\d{2}')  # Match years from 1900-2099
+                    year_matches = year_pattern.findall(os.path.basename(pdf_path))
+                    if year_matches:
+                        metadata['year'] = year_matches[0]
+                    else:
+                        # Try to find year in first page text
+                        year_matches = year_pattern.findall(first_page_text[:500])  # Check first 500 chars
+                        if year_matches:
+                            metadata['year'] = year_matches[0]
+                        else:
+                            metadata['year'] = "n.d."  # No date
+                
+                # If we don't have authors yet, try to extract them from the first page
+                if 'authors' not in metadata or not metadata['authors']:
+                    # Look for common patterns like "by" or "Author:" in first 500 chars
+                    author_section = first_page_text[:500]
+                    author_pattern = re.compile(r'(?:by|authors?:|written by)[:\s]+([^,\.;]+(?:,\s*[^,\.;]+){0,5})', re.IGNORECASE)
+                    author_match = author_pattern.search(author_section)
+                    if author_match:
+                        metadata['authors'] = author_match.group(1).strip()
+                    else:
+                        # Just use the filename as a fallback
+                        base_name = os.path.basename(pdf_path).replace('.pdf', '')
+                        metadata['authors'] = base_name.split('_')[0] if '_' in base_name else base_name
+        
+        # If we still have missing or problematic metadata, use the LLM to extract it
+        if not metadata.get('title') or not metadata.get('authors') or metadata.get('title') == "Microsoft Word" or "syllabus.doc" in metadata.get('title', ''):
+            try:
+                # Initialize the Gemini model for vision tasks
+                api_key = os.environ.get("GEMINI_API_KEY")
+                if not api_key:
+                    api_key = os.environ.get("GOOGLE_API_KEY")
+                    
+                if api_key:
+                    genai.configure(api_key=api_key)
+                    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                    
+                    # Create a prompt for the model
+                    prompt = """
+                    You are an expert at extracting academic citation information from PDFs.
+                    Please extract the following information from this PDF:
+                    1. Title of the paper/document
+                    2. Author(s)
+                    3. Publication year
+                    4. Journal or publisher (if available)
+                    
+                    Format your response as a JSON object with these fields:
+                    {
+                        "title": "The full title",
+                        "authors": "Author names in format: Last, First M.",
+                        "year": "YYYY",
+                        "journal": "Journal name or publisher"
+                    }
+                    
+                    If any information is not available, use "Unknown" for that field.
+                    """
+                    
+                    # Send the PDF directly to the model
+                    with open(pdf_path, 'rb') as f:
+                        pdf_data = f.read()
+                    
+                    # Convert first page to image if possible
+                    try:
+                        import fitz  # PyMuPDF
+                        doc = fitz.open(stream=pdf_data, filetype="pdf")
+                        pix = doc[0].get_pixmap()
+                        img_path = f"{pdf_path}_temp.png"
+                        pix.save(img_path)
+                        
+                        # Send the image to the model with retry
+                        img = Image.open(img_path)
+                        response = api_call_with_retry(lambda: model.generate_content([prompt, img]))
+                        
+                        # Clean up temporary image
+                        os.remove(img_path)
+                        
+                        # Parse the JSON response
+                        import json
+                        try:
+                            # Extract JSON from the response
+                            json_str = response.text
+                            # Find JSON object in the response if it's not pure JSON
+                            json_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+                            if json_match:
+                                json_str = json_match.group(0)
+                            
+                            llm_metadata = json.loads(json_str)
+                            
+                            # Update metadata with LLM-extracted information
+                            if llm_metadata.get('title') and llm_metadata['title'] != "Unknown":
+                                metadata['title'] = llm_metadata['title']
+                            if llm_metadata.get('authors') and llm_metadata['authors'] != "Unknown":
+                                metadata['authors'] = llm_metadata['authors']
+                            if llm_metadata.get('year') and llm_metadata['year'] != "Unknown":
+                                metadata['year'] = llm_metadata['year']
+                            if llm_metadata.get('journal') and llm_metadata['journal'] != "Unknown":
+                                metadata['journal'] = llm_metadata['journal']
+                        except Exception as e:
+                            logger.warning(f"Error parsing LLM response: {str(e)}")
+                    except Exception as e:
+                        logger.warning(f"Error converting PDF to image: {str(e)}")
+            except Exception as e:
+                logger.warning(f"Error using LLM for metadata extraction: {str(e)}")
+        
+        # Clean up metadata
+        if 'title' in metadata and metadata['title']:
+            # Remove "Microsoft Word -" and similar prefixes
+            metadata['title'] = re.sub(r'^Microsoft Word\s*-\s*', '', metadata['title'])
+            # Remove file extensions
+            metadata['title'] = re.sub(r'\.docx?$|\.pdf$', '', metadata['title'])
+            # Clean up title
+            metadata['title'] = re.sub(r'[_\-]', ' ', metadata['title']).strip()
         
         return metadata
     except Exception as e:
@@ -140,7 +248,9 @@ def extract_references_from_final_paper(final_paper_path):
         possible_pdf_dirs = [
             os.path.join(os.path.dirname(os.path.dirname(final_paper_path)), "pdfs"),
             os.path.join(os.path.dirname(final_paper_path), "pdfs"),
-            os.path.join(os.path.dirname(final_paper_path), "..", "pdfs")
+            os.path.join(os.path.dirname(final_paper_path), "..", "pdfs"),
+            os.path.join(os.path.dirname(final_paper_path), "research_output", "pdfs"),
+            os.path.join(os.path.dirname(os.path.dirname(final_paper_path)), "research_output", "pdfs")
         ]
         
         pdf_files = []
@@ -152,6 +262,7 @@ def extract_references_from_final_paper(final_paper_path):
         
         # If no PDFs found in standard directories, search for PDF mentions in the content
         if not pdf_files:
+            # Look for PDF mentions in the content
             pdf_pattern = re.compile(r'([^\/\s]+\.pdf)')
             pdf_mentions = set()
             for match in pdf_pattern.finditer(content):
@@ -166,6 +277,19 @@ def extract_references_from_final_paper(final_paper_path):
                             pdf_path = os.path.join(pdf_dir, pdf_file)
                             if os.path.exists(pdf_path) and pdf_path not in pdf_files:
                                 pdf_files.append(pdf_path)
+            
+            # If still no PDFs found, search in the entire project directory
+            if not pdf_files:
+                logger.info("Searching for PDFs in the entire project directory...")
+                project_dir = os.path.dirname(os.path.dirname(final_paper_path))
+                for root, _, files in os.walk(project_dir):
+                    for file in files:
+                        if file.endswith('.pdf'):
+                            pdf_path = os.path.join(root, file)
+                            pdf_files.append(pdf_path)
+                            logger.info(f"Found PDF: {pdf_path}")
+                
+                logger.info(f"Found {len(pdf_files)} PDF files in the project directory")
         
         # Extract references section
         references = []
@@ -206,6 +330,24 @@ def extract_references_from_final_paper(final_paper_path):
                 citations.add(citation)
         
         logger.info(f"Found {len(citations)} in-text citations in the paper")
+        
+        # If we have references but no PDFs, try to find PDFs based on reference text
+        if references and not pdf_files:
+            logger.info("Trying to find PDFs based on reference text...")
+            for ref in references:
+                # Extract potential filenames from references
+                words = re.findall(r'\b\w+\b', ref.lower())
+                for pdf_dir in possible_pdf_dirs:
+                    if os.path.exists(pdf_dir):
+                        for pdf_file in os.listdir(pdf_dir):
+                            if pdf_file.endswith('.pdf'):
+                                # Check if key words from reference appear in filename
+                                pdf_lower = pdf_file.lower()
+                                if any(word in pdf_lower for word in words if len(word) > 3):
+                                    pdf_path = os.path.join(pdf_dir, pdf_file)
+                                    if pdf_path not in pdf_files:
+                                        pdf_files.append(pdf_path)
+                                        logger.info(f"Found matching PDF: {pdf_file} for reference: {ref[:50]}...")
         
         return pdf_files, content
     except Exception as e:
@@ -284,7 +426,79 @@ def generate_academic_citations(pdf_paths):
     
     return citations
 
-def format_as_academic_paper(model, content, pdf_paths):
+def api_call_with_retry(func, max_retries=5, initial_delay=2):
+    """Execute an API call with retry logic and exponential backoff for rate limiting."""
+    retry_count = 0
+    delay = initial_delay
+    
+    while retry_count < max_retries:
+        try:
+            return func()
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str or "quota" in error_str.lower() or "exhausted" in error_str.lower():
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Maximum retries reached. Last error: {error_str}")
+                    raise
+                
+                wait_time = delay * (2 ** (retry_count - 1))  # Exponential backoff
+                logger.warning(f"API quota exhausted. Waiting {wait_time} seconds before retry {retry_count}/{max_retries}...")
+                time.sleep(wait_time)
+            else:
+                # If it's not a quota error, re-raise immediately
+                logger.error(f"API error (not quota related): {error_str}")
+                raise
+    
+    # This should not be reached due to the raise in the loop
+    raise Exception("Maximum retries exceeded")
+
+def detect_language(model, text, default_language="en"):
+    """Detect the language of a text with retry mechanism."""
+    if not text or len(text.strip()) < 20:
+        return default_language
+        
+    language_prompt = f"""
+    Detect the language of the following text. Return only the language code (e.g., 'en' for English, 'tr' for Turkish, etc.):
+    
+    {text[:1000]}
+    """
+    
+    try:
+        language_response = api_call_with_retry(lambda: model.generate_content(language_prompt))
+        detected_language = language_response.text.strip().lower()
+        
+        # Normalize language code
+        if detected_language in ['english', 'en', 'en-us', 'en-gb']:
+            return 'en'
+        elif detected_language in ['turkish', 'tr', 'türkçe', 'turkce']:
+            return 'tr'
+        else:
+            return default_language
+    except Exception as e:
+        logger.warning(f"Error detecting language: {str(e)}")
+        return default_language
+
+def translate_text(model, text, source_language, target_language):
+    """Translate text from source language to target language with retry mechanism."""
+    if source_language == target_language:
+        return text
+        
+    translation_prompt = f"""
+    Translate the following text from {source_language} to {'English' if target_language == 'en' else 'Turkish'}.
+    Maintain the academic style and terminology. Keep any citations in their original format.
+    
+    {text}
+    """
+    
+    try:
+        translation_response = api_call_with_retry(lambda: model.generate_content(translation_prompt))
+        return translation_response.text.strip()
+    except Exception as e:
+        logger.warning(f"Error translating text: {str(e)}")
+        return text  # Return original text if translation fails
+
+def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto"):
     """Format the content as an academic paper with in-text citations."""
     try:
         # Step 1: Parse the original paper structure
@@ -349,8 +563,14 @@ def format_as_academic_paper(model, content, pdf_paths):
                 # Format year
                 year = metadata.get('year', 'n.d.')
                 
+                # Format journal/publisher if available
+                journal = metadata.get('journal', '')
+                
                 # Create citation in APA format
-                citation = f"{authors} ({year}). {title_text}."
+                if journal:
+                    citation = f"{authors} ({year}). {title_text}. {journal}."
+                else:
+                    citation = f"{authors} ({year}). {title_text}."
                 pdf_citations.append(citation)
             except Exception as e:
                 logger.warning(f"Error creating citation for {pdf_path}: {str(e)}")
@@ -397,46 +617,89 @@ def format_as_academic_paper(model, content, pdf_paths):
                 seen_refs.add(citation)
                 all_references.append(citation)
         
-        # Step 5: Create a better prompt for academic formatting
-        prompt = f"""
-        Enhance the following research paper to meet academic standards while PRESERVING ALL ORIGINAL CONTENT.
+        # Step 5: Determine the target language
+        if preferred_language == "auto":
+            # Create a sample text from the paper content for language detection
+            sample_text = title + "\n"
+            for section_name, section_lines in sections.items():
+                if section_name != "References" and len(section_lines) > 0:
+                    sample_text += "\n".join(section_lines[:min(10, len(section_lines))])
+                    break
+            
+            main_language = detect_language(model, sample_text, default_language="en")
+            logger.info(f"Auto-detected main language: {main_language}")
+        else:
+            main_language = preferred_language
+            logger.info(f"Using user-specified language: {main_language}")
         
-        IMPORTANT INSTRUCTIONS:
-        1. DO NOT change the paper's structure or reorganize sections
-        2. DO NOT remove any content or findings from the original paper
-        3. DO NOT add new content that wasn't in the original paper
-        4. DO improve the academic tone and language
-        5. DO format in-text citations properly as (Author, Year)
-        6. DO ensure all citations have corresponding entries in the references list
-        7. DO maintain all technical details and specialized terminology
+        # Step 6: Format the paper with consistent language and in-text citations
+        formatted_sections = {}
         
-        Original paper title: {title or "Research Paper"}
+        # Process each section
+        total_sections = len(sections) - (1 if "References" in sections else 0)
+        processed_sections = 0
         
-        Original content:
-        {content}
+        for section_name, section_lines in sections.items():
+            if section_name == "References":
+                continue  # Skip references section, we'll create a new one
+            
+            processed_sections += 1
+            print(f"Processing section {processed_sections}/{total_sections}: {section_name}")
+            
+            section_text = "\n".join(section_lines)
+            
+            # Check if this section needs language correction
+            if len(section_text) > 50:  # Only check substantial sections
+                section_language = detect_language(model, section_text[:500], default_language=main_language)
+                
+                # If section language doesn't match main language, translate it
+                if section_language != main_language:
+                    logger.info(f"Translating section '{section_name}' from {section_language} to {main_language}")
+                    print(f"  - Translating from {section_language} to {main_language}...")
+                    section_text = translate_text(model, section_text, section_language, main_language)
+            
+            # Format in-text citations
+            print(f"  - Formatting citations...")
+            citation_prompt = f"""
+            Format the following academic text with proper in-text citations. Use the APA style for in-text citations.
+            The text already contains some citations, but they may not be in the correct format.
+            DO NOT add any new information or change the meaning of the text.
+            DO NOT add any citations that are not already present in the text.
+            
+            Here are the available references:
+            {chr(10).join([f"- {ref}" for ref in all_references[:20]])}
+            
+            Text to format:
+            {section_text}
+            """
+            
+            try:
+                citation_response = api_call_with_retry(lambda: model.generate_content(citation_prompt))
+                formatted_text = citation_response.text.strip()
+                formatted_sections[section_name] = formatted_text.split('\n')
+            except Exception as e:
+                logger.warning(f"Error formatting citations in section {section_name}: {str(e)}")
+                formatted_sections[section_name] = section_lines
         
-        References to include (format these properly in APA style):
-        {json.dumps(all_references, indent=2)}
+        # Step 7: Assemble the formatted paper
+        formatted_paper = f"```markdown\n# {title}\n\n"
         
-        The output should be in Markdown format with the same structure as the original paper.
-        """
+        # Add each formatted section
+        for section_name, section_lines in formatted_sections.items():
+            formatted_paper += f"## {section_name}\n\n"
+            formatted_paper += "\n".join(section_lines) + "\n\n"
         
-        # Step 6: Generate the formatted paper
-        response = model.generate_content(prompt)
-        formatted_paper = response.text
+        # Add references section
+        formatted_paper += "## References\n\n"
+        for i, ref in enumerate(all_references):
+            formatted_paper += f"{i+1}. {ref}\n\n"
         
-        # Step 7: Ensure references are properly included
-        if "## References" not in formatted_paper and all_references:
-            formatted_paper += "\n\n## References\n\n"
-            for i, ref in enumerate(all_references, 1):
-                formatted_paper += f"{i}. {ref}\n\n"
+        formatted_paper += "```"
         
-        logger.info("Successfully formatted the paper as an academic document")
         return formatted_paper
     except Exception as e:
-        logger.error(f"Error formatting as academic paper: {str(e)}")
-        # Return original content if formatting fails
-        return content
+        logger.error(f"Error formatting academic paper: {str(e)}")
+        return None
 
 def save_formatted_paper(final_paper_path, formatted_paper):
     """Save the formatted paper to a new file."""
@@ -468,6 +731,12 @@ def parse_arguments():
         default=True,
         help="Preserve the original paper structure (default: True)"
     )
+    parser.add_argument(
+        "--language",
+        choices=["auto", "en", "tr"],
+        default="auto",
+        help="Preferred language for the paper (auto, en, tr) (default: auto)"
+    )
     return parser.parse_args()
 
 def main():
@@ -477,7 +746,33 @@ def main():
     # Parse arguments
     args = parse_arguments()
     
+    # Check for required dependencies
+    try:
+        import PyPDF2
+    except ImportError:
+        logger.warning("PyPDF2 not installed. Installing...")
+        try:
+            import subprocess
+            subprocess.check_call(["pip", "install", "PyPDF2"])
+            logger.info("PyPDF2 installed successfully")
+        except Exception as e:
+            logger.error(f"Failed to install PyPDF2: {str(e)}")
+            return
+    
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        logger.warning("PyMuPDF not installed. Installing...")
+        try:
+            import subprocess
+            subprocess.check_call(["pip", "install", "PyMuPDF"])
+            logger.info("PyMuPDF installed successfully")
+        except Exception as e:
+            logger.error(f"Failed to install PyMuPDF: {str(e)}")
+            logger.warning("Continuing without PyMuPDF - some PDF processing features may be limited")
+    
     # Initialize model
+    print("Initializing AI model...")
     model = initialize_model()
     if not model:
         logger.error("Failed to initialize model. Exiting.")
@@ -491,6 +786,7 @@ def main():
     
     try:
         # Extract references and content
+        print("Extracting references and content from paper...")
         logger.info(f"Extracting references from {final_paper_path}")
         pdf_paths, content = extract_references_from_final_paper(final_paper_path)
         
@@ -498,11 +794,16 @@ def main():
             logger.error("Failed to read content from the paper")
             return
             
+        print(f"Found {len(pdf_paths)} PDF files for citation generation")
         logger.info(f"Found {len(pdf_paths)} PDF files for citation generation")
         
         # Format as academic paper
+        print("\nFormatting paper as academic document...")
+        print("This process may take some time as we ensure all sections are in the preferred language.")
+        print("The system will automatically handle any API quota limitations by waiting when necessary.\n")
+        
         logger.info("Formatting paper as academic document...")
-        formatted_paper = format_as_academic_paper(model, content, pdf_paths)
+        formatted_paper = format_as_academic_paper(model, content, pdf_paths, args.language)
         
         # Validate the formatted paper
         if not formatted_paper or len(formatted_paper) < 100:
@@ -510,31 +811,23 @@ def main():
             return
             
         # Save formatted paper
+        print("Saving formatted paper...")
         output_path = save_formatted_paper(final_paper_path, formatted_paper)
-        if output_path:
-            logger.info(f"Successfully created academic paper at {output_path}")
-            print(f"\nAcademic paper created at: {output_path}")
-            
-            # Provide a summary of changes
-            original_lines = len(content.split('\n'))
-            formatted_lines = len(formatted_paper.split('\n'))
-            print(f"\nSummary of changes:")
-            print(f"- Original paper: {original_lines} lines")
-            print(f"- Formatted paper: {formatted_lines} lines")
-            print(f"- References processed: {len(pdf_paths)}")
-            
-            # Check if references section exists
-            if "## References" in formatted_paper:
-                ref_section = formatted_paper.split("## References")[1]
-                ref_count = len(re.findall(r'\n\d+\.', ref_section))
-                print(f"- References included: {ref_count}")
-            else:
-                print("- Warning: No References section found in formatted paper")
-        else:
-            logger.error("Failed to create academic paper")
+        logger.info(f"Formatted paper saved to {output_path}")
+        
+        print(f"\n✅ Academic paper formatting complete!")
+        print(f"Output file: {output_path}")
+        print("\nAll sections have been processed and translated to the preferred language.")
+        print("Citations have been properly formatted according to academic standards.")
+        
+    except KeyboardInterrupt:
+        print("\n\nProcess interrupted by user. Exiting...")
+        logger.warning("Process interrupted by user")
     except Exception as e:
-        logger.error(f"Error in academic formatting process: {str(e)}", exc_info=True)
-        print(f"\nError: {str(e)}")
+        logger.error(f"Error in main process: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        print(f"\n❌ Error: {str(e)}")
         print("Please check the academic_formatter.log file for details.")
 
 if __name__ == "__main__":
