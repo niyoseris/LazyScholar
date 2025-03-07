@@ -137,7 +137,7 @@ def extract_metadata_from_pdf(pdf_path):
                         # Just use the filename as a fallback
                         base_name = os.path.basename(pdf_path).replace('.pdf', '')
                         metadata['authors'] = base_name.split('_')[0] if '_' in base_name else base_name
-        
+            
         # If we still have missing or problematic metadata, use the LLM to extract it
         if not metadata.get('title') or not metadata.get('authors') or metadata.get('title') == "Microsoft Word" or "syllabus.doc" in metadata.get('title', ''):
             try:
@@ -403,12 +403,13 @@ def generate_academic_citations(pdf_paths):
                 else:
                     year = "n.d."
             
+            # Format journal/publisher if available
+            journal = metadata.get('journal', '')
+            
             # Create citation in APA format
-            if ',' in authors:
-                # Multiple authors
-                citation = f"{authors} ({year}). {title}."
+            if journal:
+                citation = f"{authors} ({year}). {title}. {journal}."
             else:
-                # Single author
                 citation = f"{authors} ({year}). {title}."
             
             citations.append(citation)

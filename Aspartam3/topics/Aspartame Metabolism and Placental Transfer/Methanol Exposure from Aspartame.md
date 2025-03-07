@@ -1,0 +1,20 @@
+# Methanol Exposure from Aspartame
+
+### Aspartam Metabolizması ve Plasental Geçiş: Metanol Maruziyeti
+
+Aspartamın metabolizması sonucu ortaya çıkan metanol, potansiyel toksikolojik etkileri nedeniyle dikkat çekmektedir. Aspartam alımından kaynaklanan metanolün, endojen kaynaklardan (örneğin, meyve pektinlerinden) ve doğal olarak gıdalarda bulunan metanolden gelen toplam metanol alımına olan katkısı önemli bir sorudur (Author, Year). Bebekler için hesaplanan metanol maruz kalma aralıklarının doğruluğu sorgulanmaktadır, zira bu aralıkların yetişkinlerdeki bazal endojen metanol maruziyetinden türetildiği ve bu durumun bebeklerde eksik, yaşlılarda ise aşırı tahminlere yol açabileceği belirtilmektedir (Author, Year).
+
+Metanolün toksikolojisi, Avrupa Kimyasallar Ajansı (ECHA) tarafından REACH düzenlemesi kapsamında değerlendirilmektedir. ECHA'nın web sitesinde, genel popülasyon için kısa ve uzun vadeli oral Türetilmiş Etki Yapmayan Seviye (DNEL) değerinin 8 mg/kg vücut ağırlığı/gün olduğu belirtilmektedir (Author, Year). Metanolün gelişimsel toksisite potansiyeli, teratojenite dahil olmak üzere, incelenmiş ve kemirgen çalışmalarında beyin de dahil olmak üzere malformasyonlara neden olduğu gösterilmiştir (Author, Year). Teratojenite mekanizmasının oksidatif hasarla ilişkili olabileceği düşünülmekle birlikte, bu bulguların insanlara aktarılabilirliği tartışmalıdır (Author, Year). Metanolün formik aside metabolize olduğu ve bu metabolitin insan plasentasından geçerek plasenta fonksiyonunu bozabileceği belirtilmektedir. Folik asidin plasenta üzerindeki bu etkileri hafifletebileceği, ancak metanol transferini engellemediği vurgulanmaktadır (Author, Year).
+
+Aspartamdan kaynaklanan fenilalanin maruziyetinin ve bunun gelişimsel etkilerinin aspartam risk karakterizasyonu için kritik öneme sahip olduğu göz önüne alındığında, metanol ve fenilalaninin potansiyel aditif gelişimsel etkilerinin göz ardı edilip edilemeyeceği sorusu gündeme gelmektedir (Author, Year). Mevcut metanol DNEL'lerindeki tüm belirsizlikler dikkate alındığında dahi, endojen kaynaklardan ve doğal gıda oluşumundan kaynaklanan metanol alımlarının genellikle 8 mg/kg vücut ağırlığı/gün değerini aştığı belirtilmektedir (Author, Year). Bu nedenle, aspartamdan gıda katkı maddesi olarak alınan metanolün, arka plan metanol alımına önemli ölçüde (örneğin, %10'dan fazla) katkıda bulunmaması gerektiği önerilmektedir (Author, Year). Ancak, bazı durumlarda (örneğin, yüksek düzeyde aspartam tüketen yaşlılarda), aspartamdan kaynaklanan metanolün arka plan alımına %10'dan fazla katkıda bulunduğu hesaplanmıştır (Author, Year).
+
+California eyaleti, Propozisyon 65 kapsamında metanolü üreme toksini olarak tanımlamıştır ve oral yol için izin verilen maksimum doz seviyesini (MADL) 23.000 mikrogram/gün olarak belirlemiştir (Author, Year). Hamile kadınlarda aspartam metabolizmasından kaynaklanan metanol maruziyetinin, Ulusal Toksikoloji Programı'nın metanol raporundaki verilere göre oral MADL'nin altında olduğu hesaplanmaktadır (Author, Year). Bu nedenle, aspartamın Propozisyon 65 listesinde yer almaması nedeniyle, aspartam metabolizması sonucu oluşan metanole maruziyetin bu düzenleme kapsamında değerlendirilmediği belirtilmektedir (Author, Year). Aspartam, bağırsak esterazları ve peptidazlar tarafından iki amino aside (aspartik asit ve fenilalanin) ve metanole metabolize edilir (Author, Year). Aspartamın parçalanma ürünleri, tek başına verildiklerinde veya aspartamdan türetildiklerinde benzer şekilde emilir ve metabolize edilir (Author, Year). Aspartamın presistemik metabolizması, genel dolaşıma çok az miktarda ana bileşik ulaşmasına neden olur (Author, Year). Metanol de hızla metabolize olur ve yüksek dozlarda aspartam (>50 mg/kg vücut ağırlığı) uygulanmadıkça kan seviyeleri genellikle tespit edilemez (Author, Year). Aspartamdan kaynaklanan metanol toksisitesi geçmişte gündeme getirilmiştir (Author, Year).
+
+
+## References
+
+1. SOURCE: 130409-p11.pdf
+2. SOURCE: 130409-p11.pdf
+3. SOURCE: sci-com_scf_out155_en.pdf
+4. SOURCE: fsormethanol041813.pdf
+5. SOURCE: fsormethanol041813.pdf
