@@ -355,75 +355,23 @@ def extract_references_from_final_paper(final_paper_path):
         return [], ""
 
 def generate_academic_citations(pdf_paths):
-    """Generate academic citations in APA format based on PDF metadata."""
+    """Generate simple citations based on PDF filenames."""
     citations = []
     
     for pdf_path in pdf_paths:
         try:
-            metadata = extract_metadata_from_pdf(pdf_path)
+            # Get just the filename without path
+            filename = os.path.basename(pdf_path)
             
-            # Format authors
-            authors = metadata.get('authors', '')
-            if not authors or authors == "Unknown":
-                # Try to extract author from filename
-                base_name = os.path.basename(pdf_path).replace('.pdf', '')
-                parts = base_name.split('_')
-                if len(parts) > 1:
-                    authors = parts[0].replace('-', ' ').title()
-                else:
-                    authors = "Unknown Author"
-            
-            # Clean up authors
-            authors = re.sub(r'[_\-]', ' ', authors)
-            
-            # Format title
-            title = metadata.get('title', '')
-            if not title or len(title) < 5:
-                # Use filename as title
-                base_name = os.path.basename(pdf_path).replace('.pdf', '')
-                parts = base_name.split('_')
-                if len(parts) > 1:
-                    title = ' '.join(parts[1:]).replace('-', ' ').title()
-                else:
-                    title = base_name.replace('-', ' ').title()
-            
-            # Clean up title
-            title = re.sub(r'[_\-]', ' ', title)
-            
-            # Format year
-            year = metadata.get('year', '')
-            if not year or year == "n.d.":
-                # Try to extract year from filename or title
-                year_pattern = re.compile(r'(19|20)\d{2}')
-                year_match = year_pattern.search(os.path.basename(pdf_path))
-                if year_match:
-                    year = year_match.group(0)
-                elif year_pattern.search(title):
-                    year = year_pattern.search(title).group(0)
-                else:
-                    year = "n.d."
-            
-            # Format journal/publisher if available
-            journal = metadata.get('journal', '')
-            
-            # Create citation in APA format
-            if journal:
-                citation = f"{authors} ({year}). {title}. {journal}."
-            else:
-                citation = f"{authors} ({year}). {title}."
+            # Create a simple citation using the filename
+            citation = f"{filename}"
             
             citations.append(citation)
         except Exception as e:
             logger.error(f"Error generating citation for {pdf_path}: {str(e)}")
             # Create a basic citation from the filename
-            base_name = os.path.basename(pdf_path).replace('.pdf', '')
-            parts = base_name.split('_')
-            if len(parts) > 1:
-                author = parts[0].replace('-', ' ').title()
-                title = ' '.join(parts[1:]).replace('-', ' ').title()
-                citations.append(f"{author} (n.d.). {title}.")
-            else:
-                citations.append(f"{base_name.replace('-', ' ').title()} (n.d.).")
+            base_name = os.path.basename(pdf_path)
+            citations.append(f"{base_name}")
     
     return citations
 
@@ -553,26 +501,9 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
         pdf_citations = []
         for pdf_path in pdf_paths:
             try:
-                metadata = extract_metadata_from_pdf(pdf_path)
-                
-                # Format authors
-                authors = metadata.get('authors', 'Unknown')
-                
-                # Format title
-                title_text = metadata.get('title', os.path.basename(pdf_path).replace('.pdf', ''))
-                
-                # Format year
-                year = metadata.get('year', 'n.d.')
-                
-                # Format journal/publisher if available
-                journal = metadata.get('journal', '')
-                
-                # Create citation in APA format
-                if journal:
-                    citation = f"{authors} ({year}). {title_text}. {journal}."
-                else:
-                    citation = f"{authors} ({year}). {title_text}."
-                pdf_citations.append(citation)
+                # Just use the filename as the citation
+                filename = os.path.basename(pdf_path)
+                pdf_citations.append(filename)
             except Exception as e:
                 logger.warning(f"Error creating citation for {pdf_path}: {str(e)}")
         
@@ -592,18 +523,8 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
                 
             # Check if it's a filename
             if ref.lower().endswith('.pdf'):
-                # Try to find a better citation for this PDF
-                found_better = False
-                for pdf_citation in pdf_citations:
-                    if ref.lower() in pdf_citation.lower():
-                        if pdf_citation not in seen_refs:
-                            seen_refs.add(pdf_citation)
-                            all_references.append(pdf_citation)
-                            found_better = True
-                            break
-                
-                # If no better citation found, use as is
-                if not found_better and ref not in seen_refs:
+                # Use as is if not already included
+                if ref not in seen_refs:
                     seen_refs.add(ref)
                     all_references.append(ref)
             else:
@@ -662,8 +583,9 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
             # Format in-text citations
             print(f"  - Formatting citations...")
             citation_prompt = f"""
-            Format the following academic text with proper in-text citations. Use the APA style for in-text citations.
-            The text already contains some citations, but they may not be in the correct format.
+            Format the following academic text with simple in-text citations. 
+            Use the format (X.pdf) where X is the number in the filename.
+            For example, if the reference is "1.pdf", use the citation format (1.pdf).
             DO NOT add any new information or change the meaning of the text.
             DO NOT add any citations that are not already present in the text.
             

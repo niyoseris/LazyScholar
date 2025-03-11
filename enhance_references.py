@@ -97,46 +97,26 @@ def extract_references_from_final_paper(final_paper_path):
         return []
 
 def enhance_references(model, references, pdf_files):
-    """Enhance references with more detailed academic citations."""
+    """Use simple numbered references instead of enhanced academic citations."""
     enhanced_references = []
     
-    for ref in references:
-        # Extract topic and subtopic
+    for i, ref in enumerate(references, 1):
+        # Extract topic and subtopic if present
         match = re.search(r'\d+\.\s+\*\*(.*?)\*\*:\s+(.*)', ref)
-        if not match:
-            enhanced_references.append(ref)  # Keep as is if format doesn't match
-            continue
-        
-        topic_subtopic = match.group(1)
-        sources = match.group(2)
-        
-        # Create prompt for the model
-        prompt = f"""
-You are an academic citation expert. I need you to convert the following source references into proper academic citations in APA format.
-
-Source information: {sources}
-Topic: {topic_subtopic}
-
-Available PDF filenames that might be related:
-{', '.join([pdf.name for pdf in pdf_files])}
-
-Please generate detailed academic citations for these sources. If the exact details aren't available, make reasonable inferences based on the topic and PDF filenames, but mark these with [inferred] at the end.
-
-Format each citation in proper APA style. Return only the citations, one per line.
-"""
-        
-        try:
-            # Generate enhanced citations
-            response = model.generate_content(prompt)
-            enhanced_citation = response.text.strip()
+        if match:
+            topic_subtopic = match.group(1)
+            sources = match.group(2)
             
-            # Format the enhanced reference
-            enhanced_ref = f"{len(enhanced_references) + 1}. **{topic_subtopic}**:\n{enhanced_citation}"
+            # Format with just the PDF filename
+            if sources.lower().endswith('.pdf'):
+                enhanced_ref = f"{i}. **{topic_subtopic}**: {sources}"
+            else:
+                enhanced_ref = f"{i}. **{topic_subtopic}**: {sources}"
+            
             enhanced_references.append(enhanced_ref)
-            logger.info(f"Enhanced reference for {topic_subtopic}")
-        except Exception as e:
-            logger.error(f"Error enhancing reference {ref}: {str(e)}")
-            enhanced_references.append(ref)  # Keep original if enhancement fails
+        else:
+            # Keep as is if format doesn't match
+            enhanced_references.append(ref)
     
     return enhanced_references
 

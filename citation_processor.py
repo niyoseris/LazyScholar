@@ -129,33 +129,25 @@ def extract_text_from_pdf(pdf_path: str) -> Optional[str]:
 
 def get_citation_info(model, pdf_text: str) -> Dict[str, Any]:
     """
-    Send PDF text to language model to extract citation information and key points.
+    Send PDF text to language model to extract key points without detailed citation information.
     
     Args:
         model: The language model to use
         pdf_text: Text content of the PDF
         
     Returns:
-        Dictionary containing citation information and key points
+        Dictionary containing key points
     """
     prompt = f"""
     Please analyze the following academic text and provide:
     
-    1. Complete citation information (authors, title, journal/publication, year, DOI if available)
-    2. Key findings and important points for research
-    3. Methodology used in the research
-    4. Limitations of the study
-    5. Conclusions and implications
+    1. Key findings and important points for research
+    2. Methodology used in the research
+    3. Limitations of the study
+    4. Conclusions and implications
     
     Format your response as JSON with the following structure:
     {{
-        "citation": {{
-            "authors": [],
-            "title": "",
-            "publication": "",
-            "year": "",
-            "doi": ""
-        }},
         "key_points": [],
         "methodology": "",
         "limitations": "",
@@ -179,7 +171,16 @@ def get_citation_info(model, pdf_text: str) -> Dict[str, Any]:
         if json_match:
             json_str = json_match.group(1)
             try:
-                return json.loads(json_str)
+                result = json.loads(json_str)
+                # Add empty citation info to maintain compatibility
+                result["citation"] = {
+                    "authors": [],
+                    "title": "",
+                    "publication": "",
+                    "year": "",
+                    "doi": ""
+                }
+                return result
             except json.JSONDecodeError:
                 logger.error(f"Failed to parse JSON from response: {json_str}")
                 return {"error": "Failed to parse JSON from response"}

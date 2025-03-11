@@ -1,0 +1,25 @@
+# Time-Dependent Earthquake Models Istanbul
+
+### Zaman Bağımlı Deprem Modelleri ve İstanbul
+
+1999 Mw7.4 Kocaeli depremi, İstanbul'un güneyindeki Marmara Denizi'nde Mw7+ büyüklüğünde bir deprem olasılığını, mevcut sismik boşlukta stres transferi nedeniyle artırmıştır. Bu durum, Marmara bölgesindeki deprem tehlikesinin daha detaylı incelenmesini gerektirmiştir. Bu kapsamda, bölgedeki deprem tehlikesi, deterministik (senaryo deprem tabanlı) ve zamana bağlı olasılıksal (yenileme) modeller kullanılarak değerlendirilmiştir (Parsons vd., 2000).
+
+Ana Marmara Fayı için bir fay segmentasyon modeli geliştirilmiş, tarihi depremlerin hasar dağılımları dikkatlice ilişkilendirilmiş ve karakteristik depremler arasındaki zaman aralıkları tahmin edilmiştir. Olasılıksal çalışmalarda, karakteristik deprem tabanlı tekrarlama ilişkileri kullanılmıştır. Karakteristik depremlerin varış zamanlarının normal dağıldığı varsayılarak, her bir segment için Ortalama Tekrarlama Süresi, Kovaryans ve Son Depremden Bu Yana Geçen Zaman gibi parametreler belirlenmiştir. Yenileme modeli çerçevesinde, her fay segmenti için koşullu olasılık, karakteristik depremin ortalama tekrarlama aralığından hesaplanmıştır. Bu olasılıklar, son depremden bu yana geçen zamanın bir fonksiyonu olarak değiştiği için koşulludur. Arka plan deprem aktivitesi için, 0.005° x 0.005° boyutundaki hücrelerden oluşan bir ızgaranın her bir hücresi için mekansal olarak düzeltilmiş bir sismisite belirlenmiştir. Her bir hücredeki sismik aktivite, 5.0 ile 7.0 arasındaki büyüklükteki depremler için, Gutenberg-Richter tipi bir tekrarlama ilişkisinin 5.0 ile 6.0 arasındaki büyüklükler için arka planda deprem tekrarlamasını yönettiği varsayılarak belirlenir. Büyüklüğü 6.0 ile 7.0 arasındaki arka plan depremleri için sonlu faylar kullanılır. Deprem tehlikesi, en yüksek yer ivmesi (PGA) ve 0.2 ve 1.0 saniyelik doğal periyotlar için spektral ivmeler (SA) cinsinden ölçülür.
+
+Parsons vd. (2000), 17 Ağustos 1999 İzmit depreminin İstanbul'daki sismik tehlike üzerindeki etkisini incelemişlerdir. Kuzey Anadolu Fay Zonu (KAFZ) üzerindeki depremlerin İstanbul'daki olası etkileri zaman bağımlı modellerle değerlendirilmiştir. İzmit depreminin İstanbul'a yakın faylar üzerindeki stres transferi dikkate alınarak, önümüzdeki 30 yıl içinde güçlü sarsıntı olasılığı %62±15 ve önümüzdeki 10 yıl içinde %32±12 olarak hesaplanmıştır. Stres tetiklemesinin, İstanbul'a doğru ilerleyen 60 yıllık deprem dizisini açıklamak için kullanıldığı belirtilmiştir. İzmit depremi, fay üzerindeki ortalama stresi düşürmesine rağmen, başka yerlerde stresi değiştirmiştir. Coulomb kırılma kriteri kullanılarak, deprem kaynaklı stres değişiklikleri komşu faylara uygulanmıştır. Stres değişimlerinden kaynaklanan geçici deprem oranı artışı veya azalışı da dikkate alınmıştır.
+
+KAFZ çevresindeki deformasyon, fayın jeolojik kayma hızıyla uyumlu olmalıdır. Reilinger ve diğerlerinin (2006) kinematik blok modeli, aktif fayların jeolojik hızlarına yakın kayması gerektiğini göstermektedir. İzmit depremi sonrası deformasyon modelleri, 1999 İzmit depreminden hemen sonra, orta ila üst kabukta kararlı sürtünmeli kaymanın meydana geldiğini doğrulamaktadır. Aylar içinde, geçici üst manto ve/veya alt kabuğun gevşemesi, hızlandırılmış deprem sonrası deformasyonun ana nedeni olmuştur. Deprem döngüsü modelleri, gözlemlenen depremler arası deformasyonu açıklamak için etkin viskozitenin önümüzdeki birkaç on yılda on kat veya daha fazla artması gerektiğini göstermektedir. Deprem döngüsü modeli kullanılarak, KAFZ boyunca büyük depremlerin kümelenmesinin, KAFZ'nin GPS kayma hızının jeolojik kayma hızından biraz daha yüksek olmasını açıklayıp açıklayamayacağı araştırılmaktadır.
+
+Stein vd. (1997) tarafından önerilen ve Türkiye'de de uygulanan (Stein vd., 1997; Parsons vd., 2000; Parsons, 2004) zamana bağlı deprem olasılıkları yaklaşımı, tek bir fay üzerindeki deprem olasılığını tahmin etmeyi amaçlar ve yakındaki depremlerin statik ve dinamik stres değişikliklerini dikkate alır. Bu modeller, deprem hazırlığı ve iş politikaları gibi kamu politikası kararlarını etkileyebilir. Mevcut deprem tehlike modelleri çoğunlukla statiktir; birkaç yılda bir yeni nesil haritalarla değiştirilmedikçe zamanla değişmezler. Ancak, değişen toplumsal ihtiyaçlara ve ortaya çıkan yeteneklere yanıt verebilmek için, tehlike değerlendirmesine yeni bir fizik tabanlı ve zamana bağlı "tahmin" yaklaşımı gereklidir. Bu yaklaşım, yeni önemli veriler elde edildiğinde veya sismisite dağılımında tespit edilebilir değişiklikler meydana geldiğinde tehlikeyi otomatik olarak yeniden hesaplayacaktır. Yeni başlatılan bir EU-FW6 projesi (NERIES), depremlerin uzay ve zamanda kümelenmesini yansıtan bu tür referans zamana bağlı deprem modellerini geliştirecek, uygulayacak ve test edecek bir alt proje içermektedir. Bu bağlantıda, artçı şokların, potansiyel öncü şokların ve deprem sürülerinin tehlike hesaplamalarına katkısını dikkate alan istatistiksel bir zamana bağlı deprem tehlike modeli oluşturulacaktır.
+
+
+## References
+
+1. 125.pdf
+2. 126.pdf
+3. 127.pdf
+4. 128.pdf
+5. 129.pdf
+6. 130.pdf
+7. 131.pdf
+8. 132.pdf

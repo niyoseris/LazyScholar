@@ -1,0 +1,23 @@
+# Sinapis arvensis co-digestion
+
+### *Sinapis arvensis*'in Ortak Sindirimi
+
+Anaerobik sindirim (AD), atık su arıtma çamurundan metan açısından zengin biyogaz şeklinde enerji geri kazanımı sağlayan bir süreçtir. Biyogaz üretimini iyileştirmek amacıyla, çoklu substratların (örneğin, gıda atığı (GA) veya katı ve sıvı yağlar (KSY) ile birlikte birincil ve atık aktif çamurların) ortak sindirimi, AD'nin performansını artırmanın bir yolu olarak değerlendirilmektedir (Yazar, Yıl). Ortak sindirim, organik yükleme oranını (OLR) artırabilir, potansiyel olarak toksik bileşiklerin konsantrasyonlarını seyreltmeye yardımcı olur, sinerjik olarak mikrobiyal aktiviteyi iyileştirir ve besin dengesini artırabilir (Yazar, Yıl). KSY'nin evsel atık su çamurları ile birlikte sindirimi, biyogaz üretiminde önemli bir artış göstermiştir (Yazar, Yıl). LA Sanitation'ın Hyperion Atık Su Arıtma Tesisi (WWTP) tarafından yapılan ilk tam ölçekli bir testte, GA ve bitkisel yemeklik yağ (VCO) birincil çamur (PS) ve kalınlaştırılmış atık aktif çamur (TWAS) ile birlikte sindirildiğinde, yalnızca PS ve TWAS alan sindiricilere göre biyogaz üretiminde bir artış gözlemlenmiştir (Yazar, Yıl). %2 uçucu katı madde yüklemesinde (VSL) VCO'nun ve %5 VSL'de gıda atığının birlikte sindirimi, biyogaz üretiminde %10-15'lik bir artışa yol açarken, aynı VSL'de tek başına her iki substratın birlikte sindirimi nominal %0'lık bir biyogaz üretimi artışı sağlamıştır (Yazar, Yıl). Ek olarak, ayrı bir deney, %15 VSL'de KSY ilavesinin, yalnızca PS ve TWAS ile beslenen bir kontrol sindiricisine kıyasla biyogaz üretiminde %30'luk bir artışa yol açtığını göstermiştir (Yazar, Yıl). %30 KSY ve %10 GA ilavesi, metan üretiminde en yüksek artışı göstererek, PS ve TWAS'ın sindirimine kıyasla %53'lük bir artış sağlamıştır (Yazar, Yıl). Çalışma, performans artışı ve önemli aktif mikrobiyal popülasyonların zenginleştirilmesi açısından birlikte sindirimin faydalarını göstermiştir (Yazar, Yıl).
+
+Mikroalglerin ve mikroalg kalıntılarının tek başına sindirilmesiyle ilişkili düşük biyolojik olarak parçalanabilirlik ve amonyak inhibisyonu riskinin üstesinden gelmek için anaerobik ortak sindirim (iki veya daha fazla substratın eş zamanlı sindirimi) bir fırsattır (Yazar, Yıl). Mikroalgler, organik yükleme oranını artırmak ve aynı zamanda alkalinite, makro ve mikro besinler sağlamak amacıyla biyogaz tesislerinde ortak substrat olarak da kullanılabilir (Yazar, Yıl). Mikroalgler ve mikroalg kalıntıları, mahsuller, enerji bitkileri, kağıt atıkları, hayvan gübresi, vinas, zeytinyağı atığı ve yağ, yağ ve gres dahil olmak üzere çok çeşitli atıklarla başarıyla ortak sindirilmiştir (Yazar, Yıl). Lipidleri alınmış mikroalgler ve gliserol ortak sindirimi de, mikroalg kaynaklı biyodizele olan artan ilgi nedeniyle büyük ölçüde araştırılmıştır (Yazar, Yıl).
+
+Ortak sindirim, birden fazla hammaddenin anaerobik sindirimidir (Yazar, Yıl). Bazı şartlarla birlikte, çürütücüler için faydalı olabilir (Yazar, Yıl). Ortak sindirim, enerji üretimini artırabilir ve çürütücü sağlığını/dengesini iyileştirebilir (Yazar, Yıl). Hammadde seçimi için dikkate alınması gereken parametreler: karbon/azot içeriği, karbonhidrat, protein ve lipit içeriği, kimyasal oksijen ihtiyacı, toplam/uçucu katılar, pH, uçucu yağ asitleri ve gaz üretimi (Yazar, Yıl). Gaz üretimi testleri: Mono-dijesyon (temel değer) ve ko-dijesyon (kombinasyonun nasıl değiştiği) (Yazar, Yıl). Ortak sindirim genellikle gaz üretimini artırır (Yazar, Yıl). Hammaddelerinizin ne içerdiğini ve çürütücünüzün neye ihtiyacı olduğunu/kaldırabileceğini bilmek önemlidir (Yazar, Yıl). Denge, hem makro hem de mikro besinler için önemlidir (Yazar, Yıl). Ortak sindirim için diğer hususlar: Hammadde ön işlem gerektiriyor mu? Hammadde ne sıklıkla ve hangi hacimlerde elde ediliyor? Hammadde, çürütücüde köpürmeye yatkın mı? (Yazar, Yıl).
+
+Bu bağlamda, mikroalglerin anaerobik sindiriminden elde edilen ve tarımda yeniden kullanılabilen digestatların kalitesini karakterize etmeyi amaçlayan çalışmalar mevcuttur (Yazar, Yıl). Termal olarak ön işlemden geçirilmiş mikroalglerin birincil çamurla birlikte ortak sindirimi de dahil olmak üzere farklı anaerobik sindirim süreçlerinden elde edilen atık sular analiz edilmiştir (Yazar, Yıl). Mikroalglerin kanalizasyon çamuru ile birlikte ortak sindirimi, atık yönetimini optimize edebilecek ve çürütücünün organik yükleme oranını artırabilecek karlı bir stratejidir (Yazar, Yıl). Ortak sindirim digestatının daha az fitotoksisite gösterdiği bulunmuştur (Yazar, Yıl).
+
+
+## References
+
+1. 117.pdf
+2. 118.pdf
+3. 121.pdf
+4. 122.pdf
+5. 123.pdf
+6. 124.pdf
+7. 125.pdf
+8. 126.pdf

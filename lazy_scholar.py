@@ -786,6 +786,7 @@ This file tracks the generated topics and subtopics for your academic research p
             for i, citation in enumerate(unique_citations, 1):
                 # If citation already starts with a number, replace it
                 citation = re.sub(r'^\d+\.\s+', '', citation)
+                # Keep the citation simple, just the filename
                 markdown += f"{i}. {citation}\n\n"
             
             if not unique_citations:
@@ -1073,7 +1074,6 @@ This file tracks the generated topics and subtopics for your academic research p
                 # Take a screenshot for debugging
                 screenshot_path = os.path.join(self.output_dir, "arxiv_search_results.png")
                 self.browser.save_screenshot(screenshot_path)
-                logger.info(f"Screenshot saved to {screenshot_path}")
                 
                 # Try to find result items
                 try:
@@ -1395,14 +1395,21 @@ This file tracks the generated topics and subtopics for your academic research p
         try:
             logger.info(f"Attempting to download PDF from: {url}")
             
-            # Create a filename from the URL
-            filename = self._sanitize_filename(os.path.basename(url))
-            if not filename.endswith(".pdf"):
-                filename += ".pdf"
-            
-            # Create the full path
+            # Create the PDF directory
             pdf_dir = os.path.join(self.output_dir, "pdfs")
             ensure_directory(pdf_dir)
+            
+            # Find the next available number for the PDF
+            existing_pdfs = [f for f in os.listdir(pdf_dir) if f.endswith('.pdf') and f[0].isdigit()]
+            if existing_pdfs:
+                # Extract numbers from filenames and find the highest
+                numbers = [int(re.match(r'(\d+)', f).group(1)) for f in existing_pdfs if re.match(r'(\d+)', f)]
+                next_number = max(numbers) + 1 if numbers else 1
+            else:
+                next_number = 1
+            
+            # Create the filename with the next number
+            filename = f"{next_number}.pdf"
             pdf_path = os.path.join(pdf_dir, filename)
             
             # Download the PDF
@@ -1414,7 +1421,7 @@ This file tracks the generated topics and subtopics for your academic research p
             
             # Implement retry logic with exponential backoff
             max_retries = 5
-            retry_delay = 2  # Start with 2 seconds
+            retry_delay = 2
             
             for retry_count in range(max_retries):
                 try:
@@ -1660,33 +1667,10 @@ This file tracks the generated topics and subtopics for your academic research p
                     
                     # Check if it's a PDF file
                     if source_file.lower().endswith('.pdf'):
-                        # Get the full path to the PDF
-                        pdf_path = os.path.join(self.output_dir, "pdfs", source_file)
-                        
-                        if os.path.exists(pdf_path):
-                            # Extract metadata and create citation
-                            try:
-                                metadata = extract_metadata_from_pdf(pdf_path)
-                                
-                                # Format authors
-                                authors = metadata.get('authors', 'Unknown')
-                                
-                                # Format title
-                                title = metadata.get('title', source_file.replace('.pdf', ''))
-                                
-                                # Format year
-                                year = metadata.get('year', 'n.d.')
-                                
-                                # Create citation in APA format
-                                citation = f"{i}. {authors} ({year}). {title}."
-                                markdown += f"{citation}\n"
-                            except Exception as e:
-                                logger.warning(f"Error creating academic citation for {source_file}: {str(e)}")
-                                markdown += f"{i}. SOURCE: {source_file}\n"
-                        else:
-                            markdown += f"{i}. SOURCE: {source_file}\n"
+                        # Just use the filename as the citation
+                        citation = f"{i}. {source_file}"
+                        markdown += f"{citation}\n"
                     else:
-                        # For non-PDF sources, just use the source name
                         markdown += f"{i}. SOURCE: {source_file}\n"
                 
             else:
