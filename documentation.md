@@ -24,3 +24,14 @@ add a --focus parameter which user can select which type of files to focus on. f
 
 
 The project's name is LazyScholar.
+
+
+wrapper:
+
+I want to build a Flask app for this project to make it more easy to setup search params. I want users can change the search parameters trough flask interface and can see created files, topics and suctopics files, downloaded pdf files within the user interface and can read them.
+
+Be sure to cover all parameters from the lazy scholar.
+
+don't make any changes in lazy scholar.py file, just make a wrapper.
+
+also save user preferences as user profiles and let users can load previous research profiles easily

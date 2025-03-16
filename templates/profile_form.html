@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}{% if edit_mode %}Edit{% else %}New{% endif %} Research Profile - LazyScholar{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow">
+                <div class="card-body">
+                    <h3 class="card-title mb-4">{% if edit_mode %}Edit{% else %}Create New{% endif %} Research Profile</h3>
+                    
+                    {% if not edit_mode and templates %}
+                    <div class="mb-4">
+                        <label class="form-label">Load from Template</label>
+                        <select class="form-select" id="template_selector">
+                            <option value="">Select a template...</option>
+                            {% for template in templates %}
+                            <option value="{{ template.id }}">{{ template.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
+
+                    <form method="POST">
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Profile Name</label>
+                            <input type="text" class="form-control" id="name" name="name" value="{{ profile.name if profile else '' }}" required>
+                            <div class="form-text">Give your research profile a descriptive name</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="problem_statement" class="form-label">Problem Statement</label>
+                            <textarea class="form-control" id="problem_statement" name="problem_statement" rows="4" required>{{ profile.problem_statement if profile else '' }}</textarea>
+                            <div class="form-text">
+                                Write a clear and specific research question or topic. Tips for better results:
+                                <ul class="mt-1">
+                                    <li>Be specific and use technical terms</li>
+                                    <li>Include key concepts and their relationships</li>
+                                    <li>Use academic keywords when appropriate</li>
+                                    <li>Example: "Impact of machine learning algorithms on early cancer detection in medical imaging"</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="search_url" class="form-label">Search URL</label>
+                            <input type="url" class="form-control" id="search_url" name="search_url" value="{{ profile.search_url if profile else 'https://scholar.google.com' }}" required>
+                            <div class="form-text">
+                                Enter the URL of any website with a search function. Examples:
+                                <ul class="mt-1">
+                                    <li>Academic: https://scholar.google.com, https://arxiv.org, https://pubmed.ncbi.nlm.nih.gov</li>
+                                    <li>General: https://duckduckgo.com, https://www.google.com</li>
+                                    <li>Custom: Any website with a search box</li>
+                                </ul>
+                                Note: Some websites may block automated searches. If one website doesn't work, try another.
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="search_suffix" class="form-label">Search Suffix</label>
+                                <input type="text" class="form-control" id="search_suffix" name="search_suffix" value="{{ profile.search_suffix if profile else '' }}">
+                                <div class="form-text">Optional: Add terms to append to all searches (e.g., "academic research")</div>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="max_pdfs_per_topic" class="form-label">Max PDFs per Topic</label>
+                                <input type="number" class="form-control" id="max_pdfs_per_topic" name="max_pdfs_per_topic" value="{{ profile.max_pdfs_per_topic if profile else 10 }}" min="1" max="50">
+                                <div class="form-text">Number of PDFs to analyze per topic (1-50)</div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="focus" class="form-label">Search Focus</label>
+                                <select class="form-select" id="focus" name="focus">
+                                    <option value="all" {% if profile and profile.focus == 'all' %}selected{% endif %}>All Content Types</option>
+                                    <option value="pdf" {% if profile and profile.focus == 'pdf' %}selected{% endif %}>PDF Files Only</option>
+                                    <option value="html" {% if profile and profile.focus == 'html' %}selected{% endif %}>HTML Content Only</option>
+                                </select>
+                                <div class="form-text">Choose what type of content to focus on</div>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="language" class="form-label">Language</label>
+                                <select class="form-select" id="language" name="language">
+                                    <option value="en" {% if profile and profile.language == 'en' %}selected{% endif %}>English</option>
+                                    <option value="tr" {% if profile and profile.language == 'tr' %}selected{% endif %}>Turkish</option>
+                                    <option value="es" {% if profile and profile.language == 'es' %}selected{% endif %}>Spanish</option>
+                                    <option value="fr" {% if profile and profile.language == 'fr' %}selected{% endif %}>French</option>
+                                    <option value="de" {% if profile and profile.language == 'de' %}selected{% endif %}>German</option>
+                                </select>
+                                <div class="form-text">Select the language for the final paper</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="academic_format" name="academic_format" {% if not profile or profile.academic_format %}checked{% endif %}>
+                                <label class="form-check-label" for="academic_format">
+                                    Use Academic Format
+                                </label>
+                                <div class="form-text">Format the final paper following academic standards</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="is_template" name="is_template" {% if profile and profile.is_template %}checked{% endif %}>
+                                <label class="form-check-label" for="is_template">
+                                    Save as Template
+                                </label>
+                                <div class="form-text">Make this profile available as a template for future research</div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">
+                                <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+                            </a>
+                            <div>
+                                {% if edit_mode %}
+                                <button type="button" class="btn btn-danger me-2" onclick="deleteProfile()">
+                                    <i class="fas fa-trash me-2"></i>Delete
+                                </button>
+                                {% endif %}
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save me-2"></i>{% if edit_mode %}Save Changes{% else %}Create Profile{% endif %}
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if edit_mode %}
+<form id="deleteForm" action="{{ url_for('delete_profile', profile_id=profile.id) }}" method="POST" style="display: none;"></form>
+<script>
+function deleteProfile() {
+    if (confirm('Are you sure you want to delete this profile? This action cannot be undone.')) {
+        document.getElementById('deleteForm').submit();
+    }
+}
+</script>
+{% else %}
+<script>
+document.getElementById('template_selector').addEventListener('change', function() {
+    const templateId = this.value;
+    if (templateId) {
+        fetch(`/api/template/${templateId}`)
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('name').value = '';
+                document.getElementById('problem_statement').value = '';
+                document.getElementById('search_url').value = data.search_url;
+                document.getElementById('search_suffix').value = data.search_suffix || '';
+                document.getElementById('max_pdfs_per_topic').value = data.max_pdfs_per_topic;
+                document.getElementById('focus').value = data.focus;
+                document.getElementById('language').value = data.language;
+                document.getElementById('academic_format').checked = data.academic_format;
+            });
+    }
+});
+</script>
+{% endif %}
+{% endblock %} 

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome to LazyScholar{% endblock %}
+
+{% block auth_content %}
+<div class="container">
+    <div class="row justify-content-center align-items-center min-vh-100">
+        <div class="col-md-8 text-center">
+            <h1 class="display-4 mb-4">Welcome to LazyScholar</h1>
+            <p class="lead mb-5">Your AI-powered research assistant that helps you conduct academic research efficiently and effectively.</p>
+            
+            <div class="row justify-content-center mb-5">
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <i class="fas fa-search fa-2x text-primary mb-3"></i>
+                            <h5 class="card-title">Smart Search</h5>
+                            <p class="card-text">Intelligent search across academic sources with customizable parameters.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <i class="fas fa-file-pdf fa-2x text-danger mb-3"></i>
+                            <h5 class="card-title">PDF Analysis</h5>
+                            <p class="card-text">Automatically analyze and extract relevant information from PDF papers.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <i class="fas fa-book fa-2x text-success mb-3"></i>
+                            <h5 class="card-title">Research Profiles</h5>
+                            <p class="card-text">Save and manage multiple research projects with custom settings.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-grid gap-3 d-sm-flex justify-content-sm-center">
+                <a href="{{ url_for('login') }}" class="btn btn-primary btn-lg px-4">
+                    <i class="fas fa-sign-in-alt me-2"></i>Login
+                </a>
+                <a href="{{ url_for('register') }}" class="btn btn-outline-primary btn-lg px-4">
+                    <i class="fas fa-user-plus me-2"></i>Register
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

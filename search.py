@@ -15,8 +15,8 @@ def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Search any website using AI-powered tools.")
     parser.add_argument("query", help="The search query")
-    parser.add_argument("--website", default="https://scholar.google.com", 
-                        help="The website URL to search (default: https://scholar.google.com)")
+    parser.add_argument("--website", default="https://duckduckgo.com", 
+                        help="The website URL to search (default: https://duckduckgo.com)")
     parser.add_argument("--max-results", type=int, default=5, 
                         help="Maximum number of results to retrieve (default: 5)")
     parser.add_argument("--headless", action="store_true", 

@@ -1,24 +1,25 @@
 # Core requirements
-selenium>=4.0.0
-requests>=2.25.0
-python-dotenv>=1.0.0
+selenium==4.18.1
+requests==2.31.0
+python-dotenv==1.0.1
 
 # Image processing
-Pillow>=10.1.0
+Pillow==10.2.0
 
 # API Integration
-google-generativeai>=0.3.1
+google-generativeai==0.3.2
 
 # WebDriver management
-webdriver-manager>=3.5.0
+webdriver-manager==4.0.1
 geckodriver-autoinstaller>=0.1.0
 
 # PDF processing
-PyPDF2>=3.0.0
-pdfplumber>=0.7.0
+PyPDF2==3.0.1
+pdfplumber==0.10.3
+PyMuPDF==1.23.26  # For PDF preview functionality
 
 # Web scraping
-beautifulsoup4>=4.9.0
+beautifulsoup4==4.12.3
 bs4>=0.0.1
 lxml>=4.9.0
 
@@ -33,3 +34,10 @@ pytest-cov>=3.0.0
 # No Python package dependencies required for the basic script
 # The main dependency is pandoc, which needs to be installed separately
 # See: https://pandoc.org/installing.html
+
+Flask==3.0.2
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-WTF==1.2.1
+Werkzeug==3.0.1
+SQLAlchemy==2.0.28

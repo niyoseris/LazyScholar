@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Files - {{ profile.name }} - LazyScholar{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card shadow">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3 class="card-title mb-0">Research Files</h3>
+                        <a href="{{ url_for('view_profile', profile_id=profile.id) }}" class="btn btn-outline-primary">
+                            <i class="fas fa-arrow-left me-2"></i>Back to Profile
+                        </a>
+                    </div>
+
+                    {% if files %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>File Name</th>
+                                    <th>Type</th>
+                                    <th>Path</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for file in files %}
+                                <tr>
+                                    <td>{{ file.name }}</td>
+                                    <td>
+                                        <span class="badge {% if file.type == 'pdf' %}bg-danger{% elif file.type == 'md' %}bg-primary{% else %}bg-secondary{% endif %}">
+                                            {{ file.type.upper() }}
+                                        </span>
+                                    </td>
+                                    <td><small class="text-muted">{{ file.path }}</small></td>
+                                    <td>
+                                        <div class="btn-group">
+                                            <a href="{{ url_for('view_file', profile_id=profile.id, filepath=file.path) }}" 
+                                               class="btn btn-sm btn-outline-primary"
+                                               target="_blank">
+                                                <i class="fas fa-eye me-1"></i>View
+                                            </a>
+                                            <a href="{{ url_for('view_file', profile_id=profile.id, filepath=file.path) }}" 
+                                               class="btn btn-sm btn-outline-secondary"
+                                               download>
+                                                <i class="fas fa-download me-1"></i>Download
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-center py-5">
+                        <div class="mb-4">
+                            <i class="fas fa-folder-open fa-4x text-muted"></i>
+                        </div>
+                        <h4 class="text-muted">No Files Yet</h4>
+                        <p class="text-muted">Files will appear here once the research process begins.</p>
+                        <a href="{{ url_for('start_research', profile_id=profile.id) }}" class="btn btn-primary mt-3">
+                            <i class="fas fa-play me-2"></i>Start Research
+                        </a>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block scripts %}
+<script>
+// Add file preview functionality for supported file types
+document.querySelectorAll('[data-bs-toggle="modal"]').forEach(button => {
+    button.addEventListener('click', function() {
+        const fileUrl = this.getAttribute('data-file-url');
+        const fileType = this.getAttribute('data-file-type');
+        const previewContainer = document.querySelector('#filePreviewContent');
+        
+        if (fileType === 'pdf') {
+            previewContainer.innerHTML = `<embed src="${fileUrl}" type="application/pdf" width="100%" height="600px">`;
+        } else if (fileType === 'md') {
+            fetch(fileUrl)
+                .then(response => response.text())
+                .then(content => {
+                    previewContainer.innerHTML = `<pre class="p-3"><code>${content}</code></pre>`;
+                });
+        }
+    });
+});
+</script>
+{% endblock %}
+{% endblock %} 

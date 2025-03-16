@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - LazyScholar{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>My Research Profiles</h2>
+        <div>
+            <a href="{{ url_for('new_profile') }}" class="btn btn-outline-primary me-2">
+                <i class="fas fa-plus me-2"></i>New Profile
+            </a>
+            <a href="{{ url_for('new_profile') }}?template=true" class="btn btn-primary">
+                <i class="fas fa-save me-2"></i>New Template
+            </a>
+        </div>
+    </div>
+
+    {% if profiles %}
+    <div class="row">
+        <!-- Templates Section -->
+        <div class="col-md-4">
+            <h4 class="mb-3">Search Templates</h4>
+            <div class="list-group mb-4">
+                {% for profile in profiles if profile.is_template %}
+                <div class="list-group-item">
+                    <div class="d-flex w-100 justify-content-between align-items-center">
+                        <h5 class="mb-1">{{ profile.name }}</h5>
+                        <div class="btn-group">
+                            <a href="{{ url_for('edit_profile', profile_id=profile.id) }}" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-edit"></i>
+                            </a>
+                            <button onclick="deleteProfile({{ profile.id }})" class="btn btn-sm btn-outline-danger">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <p class="mb-1 text-muted small">{{ profile.search_url }}</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Research Profiles Section -->
+        <div class="col-md-8">
+            <h4 class="mb-3">Research Projects</h4>
+            <div class="row row-cols-1 row-cols-md-2 g-4">
+                {% for profile in profiles if not profile.is_template %}
+                <div class="col">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h5 class="card-title">{{ profile.name }}</h5>
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="dropdown">
+                                        <i class="fas fa-ellipsis-v"></i>
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        <li>
+                                            <a class="dropdown-item" href="{{ url_for('edit_profile', profile_id=profile.id) }}">
+                                                <i class="fas fa-edit me-2"></i>Edit
+                                            </a>
+                                        </li>
+                                        <li>
+                                            <a class="dropdown-item" href="#" onclick="saveAsTemplate({{ profile.id }})">
+                                                <i class="fas fa-save me-2"></i>Save as Template
+                                            </a>
+                                        </li>
+                                        <li>
+                                            <hr class="dropdown-divider">
+                                        </li>
+                                        <li>
+                                            <a class="dropdown-item text-danger" href="#" onclick="deleteProfile({{ profile.id }})">
+                                                <i class="fas fa-trash me-2"></i>Delete
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <p class="card-text text-muted small">Created: {{ profile.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                            <p class="card-text">{{ profile.problem_statement[:200] }}{% if profile.problem_statement|length > 200 %}...{% endif %}</p>
+                            <p class="card-text text-muted small">{{ profile.search_url }}</p>
+                            <div class="mt-3">
+                                <span class="badge bg-primary me-2">{{ profile.focus }}</span>
+                                <span class="badge bg-info me-2">{{ profile.language }}</span>
+                                {% if profile.academic_format %}
+                                <span class="badge bg-success">Academic Format</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="card-footer bg-transparent">
+                            <div class="btn-group w-100">
+                                <a href="{{ url_for('view_profile', profile_id=profile.id) }}" class="btn btn-outline-primary">
+                                    <i class="fas fa-eye me-2"></i>View
+                                </a>
+                                <a href="{{ url_for('list_files', profile_id=profile.id) }}" class="btn btn-outline-secondary">
+                                    <i class="fas fa-folder me-2"></i>Files
+                                </a>
+                                <a href="{{ url_for('start_research', profile_id=profile.id) }}" class="btn btn-outline-success">
+                                    <i class="fas fa-play me-2"></i>Start
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="text-center py-5">
+        <div class="mb-4">
+            <i class="fas fa-folder-open fa-4x text-muted"></i>
+        </div>
+        <h4 class="text-muted">No Research Profiles Yet</h4>
+        <p class="text-muted">Create your first research profile to get started!</p>
+        <div class="mt-3">
+            <a href="{{ url_for('new_profile') }}" class="btn btn-primary me-2">
+                <i class="fas fa-plus me-2"></i>Create Research Profile
+            </a>
+            <a href="{{ url_for('new_profile') }}?template=true" class="btn btn-outline-primary">
+                <i class="fas fa-save me-2"></i>Create Template
+            </a>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<form id="deleteForm" method="POST" style="display: none;"></form>
+
+<script>
+function deleteProfile(profileId) {
+    if (confirm('Are you sure you want to delete this profile? This action cannot be undone.')) {
+        document.getElementById('deleteForm').action = `/profile/${profileId}/delete`;
+        document.getElementById('deleteForm').submit();
+    }
+}
+
+function saveAsTemplate(profileId) {
+    fetch(`/profile/${profileId}/edit`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+            'is_template': 'true'
+        })
+    }).then(() => {
+        window.location.reload();
+    });
+}
+</script>
+{% endblock %} 

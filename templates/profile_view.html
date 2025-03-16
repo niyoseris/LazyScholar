@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}{{ profile.name }} - LazyScholar{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-8">
+            <!-- Profile Details -->
+            <div class="card shadow mb-4">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3 class="card-title mb-0">{{ profile.name }}</h3>
+                        <div class="btn-group">
+                            <a href="{{ url_for('list_files', profile_id=profile.id) }}" class="btn btn-outline-primary">
+                                <i class="fas fa-folder me-2"></i>View Files
+                            </a>
+                            <a href="{{ url_for('start_research', profile_id=profile.id) }}" class="btn btn-success">
+                                <i class="fas fa-play me-2"></i>Start Research
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <h5>Problem Statement</h5>
+                            <p class="text-muted">{{ profile.problem_statement }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="row">
+                                <div class="col-6">
+                                    <h6>Search Focus</h6>
+                                    <p class="text-muted">{{ profile.focus.title() }}</p>
+                                </div>
+                                <div class="col-6">
+                                    <h6>Language</h6>
+                                    <p class="text-muted">{{ profile.language.upper() }}</p>
+                                </div>
+                                <div class="col-6">
+                                    <h6>Max PDFs per Topic</h6>
+                                    <p class="text-muted">{{ profile.max_pdfs_per_topic }}</p>
+                                </div>
+                                <div class="col-6">
+                                    <h6>Academic Format</h6>
+                                    <p class="text-muted">{{ "Yes" if profile.academic_format else "No" }}</p>
+                                </div>
+                                {% if profile.search_suffix %}
+                                <div class="col-12">
+                                    <h6>Search Suffix</h6>
+                                    <p class="text-muted">{{ profile.search_suffix }}</p>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Research Results -->
+            <div class="card shadow">
+                <div class="card-body">
+                    <h4 class="card-title mb-4">Research Results</h4>
+                    
+                    <!-- Topics and Files Browser -->
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="nav flex-column nav-pills" id="v-pills-tab" role="tablist">
+                                <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#v-pills-topics" type="button">
+                                    <i class="fas fa-list me-2"></i>Topics & Subtopics
+                                </button>
+                                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#v-pills-pdfs" type="button">
+                                    <i class="fas fa-file-pdf me-2"></i>PDF Files
+                                </button>
+                                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#v-pills-final" type="button">
+                                    <i class="fas fa-file-alt me-2"></i>Final Paper
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div class="tab-content" id="v-pills-tabContent">
+                                <!-- Topics & Subtopics -->
+                                <div class="tab-pane fade show active" id="v-pills-topics">
+                                    <div class="list-group">
+                                        {% for topic in topics %}
+                                        <div class="list-group-item">
+                                            <h6 class="mb-1">{{ topic.name }}</h6>
+                                            <div class="ms-3">
+                                                {% for subtopic in topic.subtopics %}
+                                                <div class="d-flex align-items-center py-1">
+                                                    <span class="me-2">•</span>
+                                                    <span>{{ subtopic }}</span>
+                                                </div>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+
+                                <!-- PDF Files -->
+                                <div class="tab-pane fade" id="v-pills-pdfs">
+                                    <div class="list-group">
+                                        {% for pdf in pdfs %}
+                                        <a href="{{ url_for('view_file', profile_id=profile.id, filepath=pdf.path) }}" class="list-group-item list-group-item-action">
+                                            <div class="d-flex w-100 justify-content-between">
+                                                <h6 class="mb-1">{{ pdf.name }}</h6>
+                                                <small class="text-muted">{{ pdf.size }}</small>
+                                            </div>
+                                            <small class="text-muted">Topic: {{ pdf.topic }}</small>
+                                        </a>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+
+                                <!-- Final Paper -->
+                                <div class="tab-pane fade" id="v-pills-final">
+                                    {% if final_paper %}
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <a href="{{ url_for('view_file', profile_id=profile.id, filepath='final_paper.pdf') }}" class="btn btn-primary mb-3">
+                                                <i class="fas fa-download me-2"></i>Download Final Paper
+                                            </a>
+                                            <div class="paper-preview">
+                                                {{ final_paper_preview | safe }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% else %}
+                                    <div class="text-center py-4">
+                                        <i class="fas fa-file-alt fa-3x text-muted mb-3"></i>
+                                        <p class="text-muted">Final paper will appear here once the research is complete.</p>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Research Progress -->
+        <div class="col-md-4">
+            <div class="card shadow">
+                <div class="card-body">
+                    <h4 class="card-title mb-4">Research Progress</h4>
+                    <div class="progress mb-3">
+                        <div class="progress-bar" role="progressbar" style="width: {{ progress }}%">{{ progress }}%</div>
+                    </div>
+                    <div class="list-group">
+                        {% for step in progress_steps %}
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">{{ step.name }}</h6>
+                                <span class="badge {% if step.status == 'completed' %}bg-success{% elif step.status == 'in_progress' %}bg-primary{% else %}bg-secondary{% endif %}">
+                                    {{ step.status | title }}
+                                </span>
+                            </div>
+                            {% if step.details %}
+                            <small class="text-muted">{{ step.details }}</small>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 
