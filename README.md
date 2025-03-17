@@ -105,6 +105,19 @@ research_output/
 - PDF extraction quality depends on the PDF structure
 - Limited to 10 PDFs per topic to avoid excessive processing
 - Without a valid API key, only default templates will be used
+- Subject to API rate limits, which may cause pauses during research process
+
+## Handling API Rate Limits
+
+LazyScholar uses Google's Gemini API, which has usage quotas that may be exceeded during intensive research sessions. When this happens:
+
+1. The application will automatically pause and wait for the quota to reset
+2. Wait times follow an exponential backoff pattern (2, 4, 8, 16, 32 seconds)
+3. Progress is preserved during these pauses
+4. For uninterrupted usage, consider:
+   - Breaking large research projects into smaller sessions
+   - Upgrading to a higher API quota tier if using the free version
+   - Running the application during off-peak hours
 
 ## Recent Updates
 

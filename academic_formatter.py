@@ -391,7 +391,7 @@ def api_call_with_retry(func, max_retries=5, initial_delay=2):
                     logger.error(f"Maximum retries reached. Last error: {error_str}")
                     raise
                 
-                wait_time = delay * (2 ** (retry_count - 1))  # Exponential backoff
+                wait_time = delay * (4 ** (retry_count - 1))  # Exponential backoff
                 logger.warning(f"API quota exhausted. Waiting {wait_time} seconds before retry {retry_count}/{max_retries}...")
                 time.sleep(wait_time)
             else:

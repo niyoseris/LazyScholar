@@ -2640,3 +2640,143 @@ This file tracks errors encountered during development of LazyScholar to avoid r
 3. Use exponential backoff for rate-limited requests
 4. Handle PDF extraction gracefully with fallback methods
 5. Implement browser fingerprint rotation to avoid detection
+
+## Current Issues
+
+### API Rate Limiting (March 17)
+- **Symptom**: Application stuck in retry loop with "API quota exhausted (429)" errors
+- **Cause**: Gemini API has rate limits that are being hit during paper generation 
+- **Context**: This was working in previous commits but now fails consistently
+- **Possible Solutions**:
+  1. Implement more sophisticated rate limiting with longer backoff periods
+  2. Add a cooling-off period between major API calls
+  3. Cache API responses to reduce the number of calls
+  4. Split large requests into smaller chunks
+  5. Consider upgrading API tier if using free tier
+  6. Check if recent changes increased the number of API calls per operation
+
+### Fix Applied (March 17)
+- **Problem**: Rate limiting backoff timing inconsistency between versions
+- **Solution**: Reverted to seconds-based backoff as per user's preference
+- **File Modified**: lazy_scholar.py
+- **Changes**: 
+  - Using seconds-based backoff (2, 4, 8, 16, 32 seconds) for API rate limit handling
+  - Simplified wait logging
+  - This matches the user's preferred behavior from previous working commits
+
+### Debugging Steps
+1. Check app.py and lazy_scholar.py for recent changes to API call patterns
+2. Add more detailed logging to identify which specific API calls are hitting limits
+3. Consider adding a feature to pause/resume research to avoid losing progress when hitting limits
+4. Implement an API usage counter to track usage and stay under limits
+
+# LazyScholar Error Documentation
+
+## API Request Handling 
+
+### Updated Implementation (matching commit 4d669e2)
+
+LazyScholar now implements an exponential backoff mechanism for handling API rate limiting in the `_api_call_with_retry` method that matches the approach from commit 4d669e2:
+
+```python
+def _api_call_with_retry(self, api_func, max_retries=5, retry_delay=2):
+    """
+    Make an API call with retry logic.
+    
+    Args:
+        api_func: Function to call the API
+        max_retries: Maximum number of retries
+        retry_delay: Initial delay between retries in seconds
+        
+    Returns:
+        API response
+    """
+    retries = 0
+    while retries < max_retries:
+        try:
+            return api_func()
+        except Exception as e:
+            retries += 1
+            
+            # Check if it's a rate limit error (429)
+            if "429" in str(e) or "Resource has been exhausted" in str(e) or "quota" in str(e).lower():
+                # For rate limit errors, use a longer delay
+                current_delay = retry_delay * (2 ** retries)  # Exponential backoff
+                current_delay = min(current_delay, 60)  # Cap at 60 seconds
+                
+                logger.warning(f"Rate limit error (429). Waiting for {current_delay} seconds before retry {retries}/{max_retries}")
+                time.sleep(current_delay)
+            else:
+                # For other errors, use standard backoff
+                if retries >= max_retries:
+                    logger.error(f"API call failed after {max_retries} retries: {str(e)}")
+                    raise
+                
+                logger.warning(f"API call failed: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})")
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 30)  # Exponential backoff, capped at 30 seconds
+    
+    return None  # This should only be reached for rate limit errors
+```
+
+### Key Characteristics
+
+1. **Error Detection**:
+   - Rate limit errors are detected when error messages contain "429", "Resource has been exhausted", or "quota" (case insensitive)
+   - Other errors use a different backoff strategy
+
+2. **Exponential Backoff**: 
+   - For rate limit errors: Exponential backoff with cap at 60 seconds
+     - Formula: `delay = min(initial_delay * 2^retry_count, 60)`
+   - For other errors: Simple retry with increasing delay, capped at 30 seconds
+     - Formula: `delay = min(delay * 2, 30)`
+
+3. **Error Handling**:
+   - For rate limit errors: Continue retrying until max retries
+   - For other errors: Raise exception after max retries
+   - Return None if max retries exceeded only for rate limit errors
+
+4. **Logging**:
+   - Rate limit errors: "Rate limit error (429). Waiting for X seconds before retry Y/Z"
+   - Other errors: "API call failed: [error]. Retrying in X seconds... (Attempt Y/Z)"
+   - Final error: "API call failed after X retries: [error]"
+
+### Differences from Previous Implementation
+
+1. **Rate Limit Handling**:
+   - **Before**: Fixed exponential delay pattern of 2, 4, 8, 16, 32 seconds regardless of initial retry_delay
+   - **After**: Scaled by initial retry_delay with cap at 60 seconds (retry_delay * 2^retries, max 60)
+
+2. **Error Handling**:
+   - **Before**: Returns error messages for all error types after max retries
+   - **After**: Raises exceptions for non-rate-limit errors after max retries
+
+3. **Wait Time Logging**:
+   - **Before**: Logged both before and after waiting
+   - **After**: Only logs before waiting
+
+4. **Non-Rate-Limit Error Handling**:
+   - **Before**: Same exponential backoff formula for all errors
+   - **After**: Different formula with 30-second cap for non-rate-limit errors
+
+### Potential Issues
+
+For methods that expected error message returns from API call failures (like `_enhance_references`), modifications may be needed since the method now raises exceptions for non-rate-limit errors after max retries instead of returning a fallback message.
+
+### Potential Improvements
+
+1. **Longer backoff periods**: For severe rate limiting, consider implementing minute-scale delays.
+
+2. **Caching responses**: Implement caching to reduce the number of similar calls.
+
+3. **Request queuing**: Create a queue system to manage API requests and avoid hitting rate limits.
+
+4. **Distributed requests**: Spread requests over time when handling multiple operations.
+
+5. **Multiple API keys**: Implement rotation between different API keys if available.
+
+6. **Proactive rate management**: Track API usage and implement proactive throttling.
+
+7. **Persistent caching**: Save previous responses to disk for resuming after rate limit errors.
+
+8. **Progress preservation**: Enable research to be paused and resumed when limits are encountered.

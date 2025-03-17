@@ -240,36 +240,23 @@ class LazyScholar:
                 
                 # Check if it's a rate limit error (429)
                 if "429" in str(e) or "Resource has been exhausted" in str(e) or "quota" in str(e).lower():
-                    # For rate limit errors, use a much longer delay with exponential backoff
-                    # Wait 2, 4, 8, 16, 32 minutes as requested
-                    minutes_to_wait = 2 ** retries if retries <= 5 else 32
-                    seconds_to_wait = minutes_to_wait
+                    # For rate limit errors, use a longer delay
+                    current_delay = retry_delay * (2 ** retries)  # Exponential backoff
+                    current_delay = min(current_delay, 60)  # Cap at 60 seconds
                     
-                    logger.warning(f"API quota exhausted (429). Waiting for {minutes_to_wait} minutes before retry {retries}/{max_retries}")
-                    
-                    # Log a message every minute during the wait
-                    for minute in range(minutes_to_wait):
-                        time.sleep(60)  # Wait for 1 minute
-                        minutes_left = minutes_to_wait - minute - 1
-                        if minutes_left > 0:
-                            logger.info(f"Still waiting... {minutes_left} minutes left before retry")
-                    
+                    logger.warning(f"Rate limit error (429). Waiting for {current_delay} seconds before retry {retries}/{max_retries}")
+                    time.sleep(current_delay)
                 else:
                     # For other errors, use standard backoff
-                    current_delay = retry_delay * (2 ** retries)  # Exponential backoff
-                    logger.warning(f"API error: {str(e)}. Waiting for {current_delay} seconds before retry {retries}/{max_retries}")
-                    time.sleep(current_delay)
-                
                     if retries >= max_retries:
                         logger.error(f"API call failed after {max_retries} retries: {str(e)}")
-                    # Instead of raising an exception, return a fallback value or message
-                    if "429" in str(e) or "Resource has been exhausted" in str(e) or "quota" in str(e).lower():
-                        return "API quota exhausted. Please try again later."
-                    else:
-                        return f"Error: {str(e)}"
+                        raise
+                    
+                    logger.warning(f"API call failed: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})")
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 30)  # Exponential backoff, capped at 30 seconds
         
-        # This should never be reached, but just in case
-        return "Error: Maximum retries exceeded"
+        return None  # This should only be reached for rate limit errors
     
     def start_browser(self) -> None:
         """Initialize and start the web browser."""
