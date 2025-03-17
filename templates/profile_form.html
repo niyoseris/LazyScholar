@@ -65,9 +65,37 @@
                             </div>
 
                             <div class="col-md-6 mb-3">
-                                <label for="max_pdfs_per_topic" class="form-label">Max PDFs per Topic</label>
+                                <label for="max_pdfs_per_topic" class="form-label">Max Sources per Topic</label>
                                 <input type="number" class="form-control" id="max_pdfs_per_topic" name="max_pdfs_per_topic" value="{{ profile.max_pdfs_per_topic if profile else 10 }}" min="1" max="50">
-                                <div class="form-text">Number of PDFs to analyze per topic (1-50)</div>
+                                <div class="form-text">Maximum number of sources to analyze per topic (1-50)</div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="site_tld" class="form-label">Domain Filter</label>
+                                <input type="text" class="form-control" id="site_tld" name="site_tld" value="{{ profile.site_tld if profile else '' }}">
+                                <div class="form-text">Optional: Filter results by domain pattern (e.g., "edu" for educational sites worldwide)</div>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="minimum_pdfs" class="form-label">Minimum Sources per Topic</label>
+                                <input type="number" class="form-control" id="minimum_pdfs" name="minimum_pdfs" value="{{ profile.minimum_pdfs if profile else 3 }}" min="1" max="20">
+                                <div class="form-text">Minimum number of sources required before stopping search (1-20)</div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="crawl_depth" class="form-label">Crawl Depth</label>
+                                <input type="number" class="form-control" id="crawl_depth" name="crawl_depth" value="{{ profile.crawl_depth if profile else 3 }}" min="1" max="10">
+                                <div class="form-text">Maximum depth for website crawling (1-10). Higher values find more sources but take longer.</div>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="max_crawl_pages" class="form-label">Max Crawl Pages</label>
+                                <input type="number" class="form-control" id="max_crawl_pages" name="max_crawl_pages" value="{{ profile.max_crawl_pages if profile else 20 }}" min="5" max="100">
+                                <div class="form-text">Maximum pages to visit per website (5-100). Higher values find more sources but take longer.</div>
                             </div>
                         </div>
 
@@ -95,13 +123,37 @@
                             </div>
                         </div>
 
-                        <div class="mb-4">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="academic_format" name="academic_format" {% if not profile or profile.academic_format %}checked{% endif %}>
-                                <label class="form-check-label" for="academic_format">
-                                    Use Academic Format
-                                </label>
-                                <div class="form-text">Format the final paper following academic standards</div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <div class="form-check mt-4">
+                                    <input class="form-check-input" type="checkbox" id="require_pdfs" name="require_pdfs" {% if not profile or profile.require_pdfs %}checked{% endif %}>
+                                    <label class="form-check-label" for="require_pdfs">
+                                        Prioritize Document Files
+                                    </label>
+                                    <div class="form-text">If checked, the system will prioritize finding document files (PDFs, etc.). If unchecked, it will use any content it can find.</div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="academic_format" name="academic_format" {% if not profile or profile.academic_format %}checked{% endif %}>
+                                    <label class="form-check-label" for="academic_format">
+                                        Use Academic Format
+                                    </label>
+                                    <div class="form-text">Format the final paper following academic standards</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="search_purpose" class="form-label">Search Purpose</label>
+                                <select class="form-select" id="search_purpose" name="search_purpose">
+                                    <option value="academic" {% if profile and profile.search_purpose == 'academic' %}selected{% endif %}>Academic Research</option>
+                                    <option value="practical" {% if profile and profile.search_purpose == 'practical' %}selected{% endif %}>How-to Guide</option>
+                                    <option value="travel" {% if profile and profile.search_purpose == 'travel' %}selected{% endif %}>Travel Guide</option>
+                                </select>
+                                <div class="form-text">Choose the purpose of your search to get better results</div>
                             </div>
                         </div>
 
@@ -162,6 +214,12 @@ document.getElementById('template_selector').addEventListener('change', function
                 document.getElementById('focus').value = data.focus;
                 document.getElementById('language').value = data.language;
                 document.getElementById('academic_format').checked = data.academic_format;
+                document.getElementById('site_tld').value = data.site_tld || '';
+                document.getElementById('minimum_pdfs').value = data.minimum_pdfs || 3;
+                document.getElementById('crawl_depth').value = data.crawl_depth || 3;
+                document.getElementById('max_crawl_pages').value = data.max_crawl_pages || 20;
+                document.getElementById('search_purpose').value = data.search_purpose || 'academic';
+                document.getElementById('require_pdfs').checked = data.require_pdfs !== false;
             });
     }
 });

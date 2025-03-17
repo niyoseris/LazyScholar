@@ -243,7 +243,7 @@ class LazyScholar:
                     # For rate limit errors, use a much longer delay with exponential backoff
                     # Wait 2, 4, 8, 16, 32 minutes as requested
                     minutes_to_wait = 2 ** retries if retries <= 5 else 32
-                    seconds_to_wait = minutes_to_wait
+                    seconds_to_wait = minutes_to_wait * 60
                     
                     logger.warning(f"API quota exhausted (429). Waiting for {minutes_to_wait} minutes before retry {retries}/{max_retries}")
                     
@@ -1027,28 +1027,28 @@ This file tracks the generated topics and subtopics for your academic research p
         
         for ref in references:
             try:
-                topic = ref.get("topic", "")
-                subtopic = ref.get("subtopic", "")
-                sources = ref.get("sources", [])
-                pdf_files = ref.get("pdf_files", [])
-                
+            topic = ref.get("topic", "")
+            subtopic = ref.get("subtopic", "")
+            sources = ref.get("sources", [])
+            pdf_files = ref.get("pdf_files", [])
+            
                 # If no sources, create a simple reference
                 if not sources and not pdf_files:
                     enhanced_references.append(f"{topic} - {subtopic}: No sources available")
                     continue
                 
-                # Create a prompt for the Gemini model
-                prompt = f"""
-                You are an academic citation expert. Convert the following source references into detailed academic citations in APA format.
-                
-                Topic: {topic}
-                Subtopic: {subtopic}
-                Sources: {sources}
-                PDF Files: {pdf_files}
-                
-                For each source, create a proper academic citation. If the source is an arXiv paper, use the arXiv ID to infer the publication year.
-                If author names are not available, use placeholder [Author, A. A.] and mark the citation as [inferred].
-                If the title is not available, use a placeholder [Title of paper] based on the topic and subtopic, and mark the citation as [inferred].
+            # Create a prompt for the Gemini model
+            prompt = f"""
+            You are an academic citation expert. Convert the following source references into detailed academic citations in APA format.
+            
+            Topic: {topic}
+            Subtopic: {subtopic}
+            Sources: {sources}
+            PDF Files: {pdf_files}
+            
+            For each source, create a proper academic citation. If the source is an arXiv paper, use the arXiv ID to infer the publication year.
+            If author names are not available, use placeholder [Author, A. A.] and mark the citation as [inferred].
+            If the title is not available, use a placeholder [Title of paper] based on the topic and subtopic, and mark the citation as [inferred].
                 
                 Format your response as a list of citations, one per line, with no additional commentary.
                 """
@@ -1177,20 +1177,20 @@ This file tracks the generated topics and subtopics for your academic research p
                         # Get the list of PDFs in the pdfs directory
                         pdf_dir = os.path.join(self.output_dir, "pdfs")
                         if os.path.exists(pdf_dir):
-                            pdf_files = [os.path.join(pdf_dir, f) for f in os.listdir(pdf_dir) if f.endswith('.pdf')]
+                        pdf_files = [os.path.join(pdf_dir, f) for f in os.listdir(pdf_dir) if f.endswith('.pdf')]
                         
-                            # Sort by creation time (newest first)
-                            pdf_files.sort(key=lambda x: os.path.getctime(x), reverse=True)
+                        # Sort by creation time (newest first)
+                        pdf_files.sort(key=lambda x: os.path.getctime(x), reverse=True)
                         
-                            # Take only the most recent PDFs up to max_pdfs_per_topic
-                            recent_pdfs = pdf_files[:self.max_pdfs_per_topic]
-                            
-                            if recent_pdfs:
-                                logger.info(f"Processing {len(recent_pdfs)} recently downloaded PDFs")
-                                # Process all PDFs for this subtopic
-                                pdf_contents = self._process_pdfs_for_subtopic(recent_pdfs, topic_title, subtopic_title) or []
-                            else:
-                                logger.warning(f"PDF directory {pdf_dir} does not exist")
+                        # Take only the most recent PDFs up to max_pdfs_per_topic
+                        recent_pdfs = pdf_files[:self.max_pdfs_per_topic]
+                        
+                        if recent_pdfs:
+                            logger.info(f"Processing {len(recent_pdfs)} recently downloaded PDFs")
+                            # Process all PDFs for this subtopic
+                            pdf_contents = self._process_pdfs_for_subtopic(recent_pdfs, topic_title, subtopic_title) or []
+                        else:
+                            logger.warning(f"PDF directory {pdf_dir} does not exist")
                         
                         # If we don't have enough content, try HTML pages
                         if len(pdf_contents) < self.minimum_pdfs:
@@ -2124,7 +2124,7 @@ This file tracks the generated topics and subtopics for your academic research p
                 if "[HTML]" in source and domain:
                     # For HTML sources, use the domain and title
                     reference = f"{i+1}. {title} - {domain}. {source}"
-                else:
+                    else:
                     # For PDF sources, use the source as is
                     reference = f"{i+1}. {source}"
                 

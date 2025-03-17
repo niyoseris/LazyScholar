@@ -144,6 +144,125 @@
             <div class="card shadow">
                 <div class="card-body">
                     <h4 class="card-title mb-4">Research Progress</h4>
+                    
+                    {% if task_id %}
+                    <!-- Real-time progress tracking -->
+                    <div id="realtime-progress">
+                        <div class="progress mb-3">
+                            <div class="progress-bar" id="progress-bar" role="progressbar" style="width: 0%">0%</div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between mb-3">
+                            <h5 id="current-step">Initializing...</h5>
+                            <span class="badge bg-primary" id="status-badge">Running</span>
+                        </div>
+                        
+                        <div class="card mb-3">
+                            <div class="card-header">
+                                <h6 class="mb-0">Activity Log</h6>
+                            </div>
+                            <div class="card-body p-0">
+                                <div id="log-messages" class="list-group list-group-flush" style="max-height: 300px; overflow-y: auto;">
+                                    <div class="list-group-item">
+                                        <small class="text-muted">Waiting for updates...</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="text-center">
+                            <div class="spinner-border text-primary" role="status" id="loading-spinner">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <script>
+                        document.addEventListener('DOMContentLoaded', function() {
+                            const taskId = "{{ task_id }}";
+                            const progressBar = document.getElementById('progress-bar');
+                            const currentStep = document.getElementById('current-step');
+                            const statusBadge = document.getElementById('status-badge');
+                            const logMessages = document.getElementById('log-messages');
+                            const loadingSpinner = document.getElementById('loading-spinner');
+                            
+                            // Set up event source for server-sent events
+                            const eventSource = new EventSource(`/api/progress/stream/${taskId}`);
+                            
+                            // Process incoming events
+                            eventSource.onmessage = function(event) {
+                                const data = JSON.parse(event.data);
+                                
+                                // Update progress bar
+                                progressBar.style.width = `${data.progress}%`;
+                                progressBar.textContent = `${data.progress}%`;
+                                
+                                // Update current step
+                                currentStep.textContent = data.current_step;
+                                
+                                // Update status badge
+                                statusBadge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                                if (data.status === 'completed') {
+                                    statusBadge.classList.remove('bg-primary', 'bg-danger');
+                                    statusBadge.classList.add('bg-success');
+                                    loadingSpinner.style.display = 'none';
+                                } else if (data.status === 'failed') {
+                                    statusBadge.classList.remove('bg-primary', 'bg-success');
+                                    statusBadge.classList.add('bg-danger');
+                                    loadingSpinner.style.display = 'none';
+                                }
+                                
+                                // Update log messages
+                                if (data.messages && data.messages.length > 0) {
+                                    // Clear the "waiting for updates" message if it's the first update
+                                    if (logMessages.querySelector('small.text-muted')) {
+                                        logMessages.innerHTML = '';
+                                    }
+                                    
+                                    // Add new messages
+                                    data.messages.forEach(msg => {
+                                        // Check if message already exists
+                                        const msgId = `msg-${msg.time.replace(/:/g, '-')}-${msg.text.substring(0, 20).replace(/[^a-zA-Z0-9]/g, '')}`;
+                                        if (!document.getElementById(msgId)) {
+                                            const msgElement = document.createElement('div');
+                                            msgElement.id = msgId;
+                                            msgElement.className = 'list-group-item';
+                                            msgElement.innerHTML = `
+                                                <div class="d-flex w-100 justify-content-between">
+                                                    <span>${msg.text}</span>
+                                                    <small class="text-muted">${msg.time}</small>
+                                                </div>
+                                            `;
+                                            logMessages.appendChild(msgElement);
+                                            
+                                            // Scroll to bottom
+                                            logMessages.scrollTop = logMessages.scrollHeight;
+                                        }
+                                    });
+                                }
+                                
+                                // Close the event source if the task is completed or failed
+                                if (data.status === 'completed' || data.status === 'failed') {
+                                    eventSource.close();
+                                    
+                                    // Reload the page after a delay to show the final results
+                                    if (data.status === 'completed') {
+                                        setTimeout(() => {
+                                            window.location.reload();
+                                        }, 3000);
+                                    }
+                                }
+                            };
+                            
+                            // Handle errors
+                            eventSource.onerror = function(error) {
+                                console.error('EventSource error:', error);
+                                eventSource.close();
+                            };
+                        });
+                    </script>
+                    {% else %}
+                    <!-- Static progress display -->
                     <div class="progress mb-3">
                         <div class="progress-bar" role="progressbar" style="width: {{ progress }}%">{{ progress }}%</div>
                     </div>
@@ -162,6 +281,7 @@
                         </div>
                         {% endfor %}
                     </div>
+                    {% endif %}
                 </div>
             </div>
         </div>

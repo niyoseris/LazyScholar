@@ -1,0 +1,20 @@
+            sources = ref.get("sources", [])
+            pdf_files = ref.get("pdf_files", [])
+            
+                # If no sources, create a simple reference
+                if not sources and not pdf_files:
+                    enhanced_references.append(f"{topic} - {subtopic}: No sources available")
+                    continue
+                
+            # Create a prompt for the Gemini model
+            prompt = f"""
+            You are an academic citation expert. Convert the following source references into detailed academic citations in APA format.
+            
+            Topic: {topic}
+            Subtopic: {subtopic}
+            Sources: {sources}
+            PDF Files: {pdf_files}
+            
+            For each source, create a proper academic citation. If the source is an arXiv paper, use the arXiv ID to infer the publication year.
+            If author names are not available, use placeholder [Author, A. A.] and mark the citation as [inferred].
+            If the title is not available, use a placeholder [Title of paper] based on the topic and subtopic, and mark the citation as [inferred].

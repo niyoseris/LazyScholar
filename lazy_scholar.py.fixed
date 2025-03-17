@@ -1,0 +1,20 @@
+        # Add the references section
+        all_content.append("# References\n\n")
+        for ref in enhanced_refs:
+            all_content.append(f"- {ref}\n")
+        
+        # Write the final paper
+        try:
+            with open(final_paper_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(all_content))
+            
+            logger.info(f"Final paper generated at: {final_paper_path}")
+            return final_paper_path
+        except Exception as e:
+            logger.error(f"Error writing final paper: {str(e)}")
+            return ""
+        
+    def _determine_content_type(self, topics: List[Dict[str, Any]]) -> str:
+        """
+        Determine the content type based on the topics.
+        

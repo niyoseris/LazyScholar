@@ -178,49 +178,69 @@ def analyze_screenshot(screenshot_path: str, prompt: str) -> Dict[str, Any]:
             "results": []
         }
 
-def analyze_screenshot_for_pdf_links(screenshot_path: str) -> Dict[str, Any]:
+def analyze_screenshot_for_pdf_links(screenshot_path: str, is_html: bool = False) -> Dict[str, Any]:
     """
-    Analyze a screenshot to find PDF links or download buttons.
+    Analyze a screenshot to identify PDF links using Gemini Vision.
     
     Args:
-        screenshot_path: Path to the screenshot
+        screenshot_path: Path to the screenshot image
+        is_html: Whether to look for HTML links instead of PDF links
         
     Returns:
-        Dictionary with information about PDF links found
+        Dictionary with analysis results, including found (boolean) and 
+        pdf_links (array of objects with text, position, and is_direct_pdf fields).
     """
-    prompt = """
-    Analyze this webpage screenshot and find links to PDF files. 
-    Look for download buttons, PDF icons, or links containing "PDF", "Download", "Full text", etc.
-    If you find any, provide the following information:
-    1. Text of the link or button
-    2. Approximate position on the page (coordinates or description)
-    3. Whether it appears to be a direct PDF link
+    link_type = "HTML" if is_html else "PDF"
+    prompt = f"""
+    Analyze this screenshot of a search results page and identify all {link_type} links.
     
-    Format your response as a JSON object with fields: found (boolean), 
-    pdf_links (array of objects with text, position, and is_direct_pdf fields).
+    IMPORTANT: Focus ONLY on actual content links, NOT navigation links, tabs, or UI elements.
+    Look for links that appear to be search results leading to actual websites with content.
+    
+    For each {link_type} link, provide:
+    1. The exact text of the link
+    2. The approximate position (x, y coordinates)
+    3. Whether it appears to be a direct link to content
+    
+    Format your response as a JSON object with the following structure:
+    {{
+        "found": true/false,
+        "pdf_links": [
+            {{
+                "text": "link text",
+                "position": {{
+                    "x": x_coordinate,
+                    "y": y_coordinate
+                }},
+                "is_direct_pdf": true/false
+            }}
+        ]
+    }}
+    
+    Only include links that are likely to be actual search results leading to content websites.
+    EXCLUDE navigation links, tabs, UI elements, and links to the search engine itself.
     """
     
     return analyze_screenshot(screenshot_path, prompt)
 
-def find_pdf_links(browser: webdriver.Chrome) -> List[Dict[str, Any]]:
+def find_pdf_links(screenshot_path: str, browser: webdriver.Chrome, is_html: bool = False) -> List[str]:
     """
-    Find PDF links on the current page using vision AI and traditional methods.
+    Find PDF or HTML links on the current page using vision AI and traditional methods.
     
     Args:
+        screenshot_path: Path to the screenshot image
         browser: Selenium WebDriver instance
+        is_html: Whether to look for HTML links instead of PDF links
         
     Returns:
-        List of dictionaries with information about PDF links
+        List of URLs for the found links
     """
-    pdf_links = []
-    
-    # Take a screenshot of the page
-    screenshot_path = take_screenshot(browser, "pdf_links")
+    result_urls = []
     
     # Analyze the screenshot with Gemini Vision
-    vision_result = analyze_screenshot_for_pdf_links(screenshot_path)
+    vision_result = analyze_screenshot_for_pdf_links(screenshot_path, is_html)
     
-    # Extract PDF links from vision analysis
+    # Extract links from vision analysis
     if vision_result and vision_result.get("found", False) and "pdf_links" in vision_result:
         for link_info in vision_result.get("pdf_links", []):
             # Try to find the element by text
@@ -250,54 +270,105 @@ def find_pdf_links(browser: webdriver.Chrome) -> List[Dict[str, Any]]:
                     return findElementsByText(arguments[0]);
                     """
                     
-                    elements_info = browser.execute_script(script, link_info["text"])
+                    elements = browser.execute_script(script, link_info["text"])
                     
-                    for element_info in elements_info:
-                        pdf_links.append({
-                            "text": element_info["text"],
-                            "href": element_info["href"],
-                            "tag": element_info["tag"],
-                            "position": element_info["position"],
-                            "is_direct_pdf": element_info["href"] and element_info["href"].lower().endswith(".pdf") if element_info["href"] else False,
-                            "source": "vision"
-                        })
+                    if elements and len(elements) > 0:
+                        for element in elements:
+                            if element.get("href") and element.get("tag") == "a":
+                                url = element.get("href")
+                                # For PDF links, check if it ends with .pdf
+                                # For HTML links, check if it's a valid URL and not a PDF
+                                if (not is_html and url.lower().endswith('.pdf')) or \
+                                   (is_html and not url.lower().endswith('.pdf') and url.startswith('http')):
+                                    if url not in result_urls:
+                                        result_urls.append(url)
+                                        logger.info(f"Found {'HTML' if is_html else 'PDF'} link via vision AI text match: {url}")
                 except Exception as e:
-                    logger.error(f"Error finding PDF link by text: {e}")
+                    logger.warning(f"Error finding element by text: {str(e)}")
+            
+            # Try to find element by position if text search failed
+            if "position" in link_info and len(result_urls) == 0:
+                try:
+                    pos = link_info["position"]
+                    script = """
+                    function findElementAtPosition(x, y) {
+                        const element = document.elementFromPoint(x, y);
+                        if (element) {
+                            // Find closest anchor parent
+                            let current = element;
+                            while (current && current.tagName !== 'A' && current !== document.body) {
+                                current = current.parentElement;
+                            }
+                            
+                            if (current && current.tagName === 'A') {
+                                const rect = current.getBoundingClientRect();
+                                return {
+                                    text: current.textContent.trim(),
+                                    href: current.href || null,
+                                    tag: current.tagName.toLowerCase(),
+                                    position: {
+                                        x: rect.x,
+                                        y: rect.y,
+                                        width: rect.width,
+                                        height: rect.height
+                                    }
+                                };
+                            }
+                            return null;
+                        }
+                        return null;
+                    }
+                    return findElementAtPosition(arguments[0], arguments[1]);
+                    """
+                    
+                    element = browser.execute_script(script, pos["x"], pos["y"])
+                    
+                    if element and element.get("href"):
+                        url = element.get("href")
+                        # For PDF links, check if it ends with .pdf
+                        # For HTML links, check if it's a valid URL and not a PDF
+                        if (not is_html and url.lower().endswith('.pdf')) or \
+                           (is_html and not url.lower().endswith('.pdf') and url.startswith('http')):
+                            if url not in result_urls:
+                                result_urls.append(url)
+                                logger.info(f"Found {'HTML' if is_html else 'PDF'} link via vision AI position match: {url}")
+                except Exception as e:
+                    logger.warning(f"Error finding element by position: {str(e)}")
     
-    # Also try traditional methods to find PDF links
-    try:
-        # Find links that likely point to PDFs
-        pdf_patterns = [
-            "a[href$='.pdf']",
-            "a[href*='pdf']",
-            "a[href*='download']",
-            "a[href*='view']",
-            "a[download]"
-        ]
-        
-        for pattern in pdf_patterns:
-            try:
-                elements = browser.find_elements(By.CSS_SELECTOR, pattern)
-                for element in elements:
-                    if element.is_displayed():
-                        href = element.get_attribute("href")
-                        text = element.text.strip() or element.get_attribute("title") or "PDF Link"
-                        
-                        # Check if this link is already in our list
-                        if not any(link["href"] == href for link in pdf_links if "href" in link and link["href"]):
-                            pdf_links.append({
-                                "text": text,
-                                "href": href,
-                                "tag": element.tag_name,
-                                "is_direct_pdf": href and href.lower().endswith(".pdf") if href else False,
-                                "source": "traditional"
-                            })
-            except Exception as e:
-                logger.error(f"Error finding PDF links with pattern {pattern}: {e}")
-    except Exception as e:
-        logger.error(f"Error in traditional PDF link finding: {e}")
+    # Fallback: Use traditional methods to find links
+    if len(result_urls) == 0:
+        logger.info(f"Using traditional methods to find {'HTML' if is_html else 'PDF'} links")
+        try:
+            # For PDF links, look for links ending with .pdf
+            # For HTML links, look for all links that don't end with .pdf
+            if not is_html:
+                elements = browser.find_elements(By.XPATH, "//a[contains(translate(@href, 'PDF', 'pdf'), '.pdf')]")
+            else:
+                elements = browser.find_elements(By.TAG_NAME, "a")
+            
+            for element in elements:
+                try:
+                    url = element.get_attribute("href")
+                    if url:
+                        # For PDF links, check if it ends with .pdf
+                        # For HTML links, check if it's a valid URL and not a PDF
+                        if (not is_html and url.lower().endswith('.pdf')) or \
+                           (is_html and not url.lower().endswith('.pdf') and url.startswith('http')):
+                            # Filter out search engine domains for HTML links
+                            if is_html and any(domain in url.lower() for domain in ["google.com", "duckduckgo.com", "bing.com"]):
+                                continue
+                            
+                            if url not in result_urls:
+                                result_urls.append(url)
+                                logger.info(f"Found {'HTML' if is_html else 'PDF'} link via traditional method: {url}")
+                except Exception as e:
+                    logger.debug(f"Error getting href attribute: {str(e)}")
+        except Exception as e:
+            logger.warning(f"Error finding links with traditional methods: {str(e)}")
     
-    return pdf_links
+    # Limit the number of results
+    max_results = 5 if is_html else 10
+    return result_urls[:max_results]
 
 def find_search_input(browser: webdriver.Chrome) -> Optional[webdriver.remote.webelement.WebElement]:
     """
