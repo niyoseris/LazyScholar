@@ -170,3 +170,7 @@ captcha_screenshots/
 results/
 *.pdf
 .DS_Store
+
+# Documentation and error tracking
+errors.md
+documentation.md

@@ -2606,3 +2606,37 @@ This file tracks errors encountered during the LazyScholar project to avoid repe
       - Fixed the indentation in the reference formatting section by correcting the else clause indentation
       - Successfully resolved all syntax errors, allowing the application to run properly
       - **Future Prevention**: Recommended using a Python code formatter like Black or YAPF to automatically fix all indentation issues throughout the codebase and prevent similar issues in the future.
+
+# Errors Tracking
+
+This file tracks errors encountered during development of LazyScholar to avoid repetition.
+
+## Common Errors
+
+### PDF Processing
+- **PDF Download Failures**: Issues when downloading PDFs from certain academic sources
+- **PDF Parsing Errors**: Problems extracting text from poorly formatted PDFs
+- **Encoding Issues**: Character encoding issues in extracted text
+
+### Web Scraping
+- **CAPTCHA Encounters**: Google Scholar and other sites sometimes trigger CAPTCHA verification
+- **Rate Limiting**: Search engines block excessive requests
+- **Site Layout Changes**: When web interfaces change, selectors may break
+
+### API Usage
+- **Gemini API Token Limits**: Exceeding API quotas
+- **API Response Timeouts**: Slow responses from LLM APIs
+- **Invalid API Key**: Configuration issues with API keys
+
+### Browser Automation
+- **Selenium Timeouts**: Browser operations taking too long
+- **Element Not Found**: Web elements missing or changed
+- **Browser Crashes**: Unexpected browser terminations
+
+## Error Mitigation Strategies
+
+1. Implement proper error handling and retries for web requests
+2. Add logging for all operations to track issues
+3. Use exponential backoff for rate-limited requests
+4. Handle PDF extraction gracefully with fallback methods
+5. Implement browser fingerprint rotation to avoid detection

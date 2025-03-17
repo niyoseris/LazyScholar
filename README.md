@@ -106,6 +106,84 @@ research_output/
 - Limited to 10 PDFs per topic to avoid excessive processing
 - Without a valid API key, only default templates will be used
 
+## Recent Updates
+
+1. **Content Type Support**: LazyScholar now supports different content types:
+   - Academic research (default)
+   - Practical how-to guides
+   - Travel guides
+
+2. **Search Purpose Parameter**: Added a search_purpose parameter to specify the type of content to generate.
+
+3. **Source Flexibility**: Changed terminology from "PDFs" to "Sources" to make it clear that the application can work with various content types.
+
+4. **Improved Search Phrases**: Search phrases for subtopics are now more specific and always in English, including relevant keywords about the main topic.
+
+5. **PDF Requirement Toggle**: Added a require_pdfs parameter to specify whether PDFs are required for the search.
+
+6. **Sequential PDF Naming**: Implemented sequential numbering for downloaded PDF files (1.pdf, 2.pdf, etc.) instead of using hash-based filenames, making it easier to identify and manage downloaded files.
+
+7. **Domain Filtering**: Added site_tld parameter to filter search results based on domain patterns (e.g., 'edu', 'gov', 'org').
+
+8. **Minimum Sources Requirement**: Added minimum_pdfs parameter to ensure LazyScholar continues searching until it finds a minimum number of valuable sources for each subtopic.
+
+9. **Crawl Depth Control**: Added crawl_depth and max_crawl_pages parameters to control how deeply the application crawls websites for content.
+
+10. **Real-time Progress Tracking**: Implemented a progress tracking system in the Flask wrapper to provide real-time updates on the research process.
+
+11. **UI Improvements**: Updated the user interface to reflect the broader focus on various content types rather than just PDFs.
+
+## Flask Web Interface
+
+LazyScholar now includes a Flask web application that provides a user-friendly interface to:
+
+- Configure research parameters
+- Track real-time progress of research
+- View and read generated content and downloaded sources
+- Save and load user research profiles
+
+### Using the Flask Interface
+
+1. **Start the Flask Application**:
+   ```bash
+   python app.py
+   ```
+   This will launch the web server, typically at http://127.0.0.1:5000/
+
+2. **User Account**:
+   - Register a new account or log in with existing credentials
+   - Accounts allow you to save and manage multiple research profiles
+
+3. **Dashboard**:
+   - View all your saved research profiles
+   - Access research results from previous projects
+   - Create new research profiles
+
+4. **Create/Edit Research Profile**:
+   - Name your research project
+   - Enter your research problem statement
+   - Configure search settings:
+     - Content type (academic, practical, travel)
+     - Search engine
+     - Language preferences
+     - Maximum and minimum sources per topic
+     - Domain filtering (edu, gov, org, etc.)
+     - Crawl depth settings
+
+5. **Start Research**:
+   - Select a profile from your dashboard
+   - Click "Start Research" to begin the automated research process
+   - Monitor real-time progress of topic generation, searches, and content extraction
+
+6. **View Results**:
+   - Browse all generated files organized by topic
+   - Read downloaded sources
+   - Access the final compiled research paper
+
+7. **Save & Load Templates**:
+   - Save successful research configurations as templates
+   - Quickly start new research using proven settings
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
