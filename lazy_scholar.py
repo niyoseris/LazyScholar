@@ -1181,8 +1181,12 @@ This file tracks the generated topics and subtopics for your academic research p
                         
                         # If we don't have enough content, try HTML pages
                         if len(pdf_contents) < self.minimum_pdfs:
-                            logger.info(f"Not enough PDF content found ({len(pdf_contents)}), adding HTML content...")
-                            self._extract_html_content(search_query, pdf_contents, topic_title, subtopic_title, search_engine)
+                            # Only switch to HTML content if focus is not specifically set to 'pdf'
+                            if self.focus != 'pdf':
+                                logger.info(f"Not enough PDF content found ({len(pdf_contents)}), adding HTML content...")
+                                self._extract_html_content(search_query, pdf_contents, topic_title, subtopic_title, search_engine)
+                            else:
+                                logger.info(f"Not enough PDF content found ({len(pdf_contents)}), but focus is set to 'pdf' only. Skipping HTML content extraction.")
                     
                     # Create the subtopic directory and file
                     topic_dir = os.path.join(self.output_dir, "topics", self._sanitize_filename(topic_title))
@@ -1222,8 +1226,12 @@ This file tracks the generated topics and subtopics for your academic research p
                         original_max = self.max_pdfs_per_topic
                         self.max_pdfs_per_topic = max(20, original_max * 2)  # Double the max or use at least 20
                         
-                        # Make a final attempt with a broader search query
-                        self._extract_html_content(final_search_query, final_contents, topic_title, subtopic_title, search_engine)
+                        # Only extract HTML content if focus is not specifically set to 'pdf'
+                        if self.focus != 'pdf':
+                            # Make a final attempt with a broader search query
+                            self._extract_html_content(final_search_query, final_contents, topic_title, subtopic_title, search_engine)
+                        else:
+                            logger.info(f"No content found for {subtopic_title}, but focus is set to 'pdf' only. Skipping HTML content extraction in final attempt.")
                         
                         # Restore original max_pdfs_per_topic
                         self.max_pdfs_per_topic = original_max
@@ -1357,10 +1365,23 @@ This file tracks the generated topics and subtopics for your academic research p
                             EC.presence_of_element_located((By.CSS_SELECTOR, "a"))
                         )
                         
-                        # Take a screenshot for debugging
-                        screenshot_path = os.path.join(self.output_dir, f"duckduckgo_search_results_page{page_num}.png")
+                        # Take a screenshot of the search results (only small screenshot instead of full page)
+                        screenshot_path = os.path.join(self.output_dir, f"search_results_page{page_num}.png")
                         self.browser.save_screenshot(screenshot_path)
-                        logger.info(f"DuckDuckGo search results page {page_num} screenshot saved to {screenshot_path}")
+                        logger.info(f"Search results page {page_num} screenshot saved")
+                        
+                        # Wait for the page to load
+                        time.sleep(3)
+                        
+                        # Store the search engine domain to avoid extracting content from it
+                        search_engine_domain = ""
+                        try:
+                            from urllib.parse import urlparse
+                            parsed_url = urlparse(self.browser.current_url)
+                            search_engine_domain = parsed_url.netloc
+                            logger.info(f"Search engine domain: {search_engine_domain}")
+                        except Exception as e:
+                            logger.warning(f"Error extracting search engine domain: {str(e)}")
                         
                         # Find all links
                         links = self.browser.find_elements(By.CSS_SELECTOR, "a")
@@ -1492,7 +1513,7 @@ This file tracks the generated topics and subtopics for your academic research p
                         EC.presence_of_element_located((By.CSS_SELECTOR, "a"))
                     )
                     
-                    # Take a screenshot for debugging
+                    # Take a screenshot of the search results (only small screenshot instead of full page)
                     screenshot_path = os.path.join(self.output_dir, "search_results.png")
                     self.browser.save_screenshot(screenshot_path)
                     
@@ -1898,7 +1919,7 @@ This file tracks the generated topics and subtopics for your academic research p
                 # Write the subtopic file
                 with open(subtopic_file, "w", encoding="utf-8") as f:
                     # Write the title
-                    f.write(f"# {subtopic_title}\n\n")
+                    f.write(f"# {subtopic}\n\n")
                     
                     # Write the content
                     for content in pdf_contents:
@@ -1915,22 +1936,22 @@ This file tracks the generated topics and subtopics for your academic research p
                 logger.error(f"Error writing subtopic file: {str(e)}")
         else:
             # If we have no content after all retries, make one final attempt with a broader search
-            logger.warning(f"No content found for {subtopic_title} after multiple attempts. Making final attempt.")
+            logger.warning(f"No content found for {subtopic} after multiple attempts. Making final attempt.")
             
             # Try a very broad search with the topic name
-            final_search_query = f"{topic_title} {subtopic_title} comprehensive information"
+            final_search_query = f"{topic} {subtopic} comprehensive information"
             final_contents = []
             
             # Try different search engines as a last resort
             for engine in ["https://www.google.com", "https://duckduckgo.com", "https://www.bing.com"]:
                 if not final_contents:
-                    self._extract_html_content(final_search_query, final_contents, topic_title, subtopic_title, engine)
+                    self._extract_html_content(final_search_query, final_contents, topic, subtopic, engine)
             
             if final_contents:
                 # Write the file with the content from the final attempt
                 try:
                     with open(subtopic_file, "w", encoding="utf-8") as f:
-                        f.write(f"# {subtopic_title}\n\n")
+                        f.write(f"# {subtopic}\n\n")
                         
                         for content in final_contents:
                             f.write(content["content"] + "\n\n")
@@ -1944,7 +1965,7 @@ This file tracks the generated topics and subtopics for your academic research p
                 except Exception as e:
                     logger.error(f"Error writing subtopic file after final attempt: {str(e)}")
             else:
-                logger.error(f"Failed to find any content for {subtopic_title} after all attempts.")
+                logger.error(f"Failed to find any content for {subtopic} after all attempts.")
                 # We don't write an empty file
         
         logger.info(f"Completed processing PDFs for subtopic: {subtopic}")
@@ -2082,13 +2103,13 @@ This file tracks the generated topics and subtopics for your academic research p
     
     def _write_subtopic_file(self, file_path: str, topic: str, subtopic: str, contents: List[Dict[str, Any]]) -> None:
         """
-        Write a subtopic file with the extracted content.
+        Write the contents of a subtopic to a markdown file.
         
         Args:
-            file_path: Path to the output file
+            file_path: Path to the markdown file
             topic: The topic title
             subtopic: The subtopic title
-            contents: List of content items
+            contents: List of content dictionaries, each with "content" and "source" keys
         """
         try:
             # Create the markdown content
@@ -2434,31 +2455,10 @@ This file tracks the generated topics and subtopics for your academic research p
             logger.info(f"Navigating to search engine: {search_url} (Page {page_num})")
             self.browser.get(search_url)
             
-            # Take a screenshot of the search results
+            # Take a screenshot of the search results (only small screenshot instead of full page)
             screenshot_path = os.path.join(self.output_dir, f"search_results_page{page_num}.png")
-            
-            # Get the full page height using JavaScript
-            try:
-                # Get original window size
-                original_size = self.browser.get_window_size()
-                
-                # Get the full page height
-                total_height = self.browser.execute_script("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);")
-                
-                # Set window size to capture full page
-                self.browser.set_window_size(original_size['width'], total_height)
-                
-                # Take the screenshot
-                self.browser.save_screenshot(screenshot_path)
-                
-                # Restore original window size
-                self.browser.set_window_size(original_size['width'], original_size['height'])
-                
-                logger.info(f"Full page screenshot saved to {screenshot_path} (height: {total_height}px)")
-            except Exception as e:
-                # Fallback to regular screenshot if the full page capture fails
-                self.browser.save_screenshot(screenshot_path)
-                logger.warning(f"Failed to capture full page screenshot, using regular screenshot instead: {str(e)}")
+            self.browser.save_screenshot(screenshot_path)
+            logger.info(f"Search results page {page_num} screenshot saved")
             
             # Wait for the page to load
             time.sleep(3)
@@ -2494,31 +2494,12 @@ This file tracks the generated topics and subtopics for your academic research p
                     logger.info("Using vision model to identify search result links")
                     screenshot_path = os.path.join(self.output_dir, f"search_results_for_links_page{page_num}.png")
                     
-                    # Get the full page height using JavaScript
-                    try:
-                        # Get original window size
-                        original_size = self.browser.get_window_size()
-                        
-                        # Get the full page height
-                        total_height = self.browser.execute_script("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);")
-                        
-                        # Set window size to capture full page
-                        self.browser.set_window_size(original_size['width'], total_height)
-                        
-                        # Take the screenshot
-                        self.browser.save_screenshot(screenshot_path)
-                        
-                        # Restore original window size
-                        self.browser.set_window_size(original_size['width'], original_size['height'])
-                        
-                        logger.info(f"Full page screenshot for links saved to {screenshot_path} (height: {total_height}px)")
-                    except Exception as e:
-                        # Fallback to regular screenshot if the full page capture fails
-                        self.browser.save_screenshot(screenshot_path)
-                        logger.warning(f"Failed to capture full page screenshot for links, using regular screenshot instead: {str(e)}")
+                    # Take a regular screenshot (without trying to capture full page)
+                    self.browser.save_screenshot(screenshot_path)
+                    logger.info("Screenshot for link detection saved")
                     
                     # Use the vision helper to find links
-                    links = find_pdf_links(screenshot_path, self.browser, is_html=True)
+                    links = find_pdf_links(screenshot_path, self.browser, is_html=True, min_results=self.minimum_pdfs, max_results=self.max_pdfs_per_topic)
                     if links and len(links) > 0:
                         # Filter out excluded domains
                         filtered_links = []
@@ -2639,31 +2620,10 @@ This file tracks the generated topics and subtopics for your academic research p
                             logger.warning(f"Error getting page title: {str(e)}")
                             page_title = "Web Page"
                         
-                        # Take a screenshot
+                        # Take a minimal screenshot if needed (not full page)
                         screenshot_path = os.path.join(self.output_dir, f"webpage_{i+1}_page{page_num}.png")
-                        
-                        # Get the full page height using JavaScript
-                        try:
-                            # Get original window size
-                            original_size = self.browser.get_window_size()
-                            
-                            # Get the full page height
-                            total_height = self.browser.execute_script("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);")
-                            
-                            # Set window size to capture full page
-                            self.browser.set_window_size(original_size['width'], total_height)
-                            
-                            # Take the screenshot
-                            self.browser.save_screenshot(screenshot_path)
-                            
-                            # Restore original window size
-                            self.browser.set_window_size(original_size['width'], original_size['height'])
-                            
-                            logger.info(f"Full page screenshot saved to {screenshot_path} (height: {total_height}px)")
-                        except Exception as e:
-                            # Fallback to regular screenshot if the full page capture fails
-                            self.browser.save_screenshot(screenshot_path)
-                            logger.warning(f"Failed to capture full page screenshot, using regular screenshot instead: {str(e)}")
+                        self.browser.save_screenshot(screenshot_path)
+                        logger.info(f"Webpage screenshot saved")
                         
                         # Get the page HTML
                         html_content = self.browser.page_source

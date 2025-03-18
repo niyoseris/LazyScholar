@@ -1,6 +1,9 @@
 """
 Vision AI helper module for the web scraper.
 This module provides functions to analyze screenshots and identify web elements using Gemini 2.0 Flash Exp.
+
+Vision usage is restricted to link detection on search pages only.
+Other functionalities use traditional DOM-based approaches.
 """
 
 import base64
@@ -223,14 +226,16 @@ def analyze_screenshot_for_pdf_links(screenshot_path: str, is_html: bool = False
     
     return analyze_screenshot(screenshot_path, prompt)
 
-def find_pdf_links(screenshot_path: str, browser: webdriver.Chrome, is_html: bool = False) -> List[str]:
+def find_pdf_links(screenshot_path: str, browser: webdriver.Chrome, is_html: bool = False, min_results: int = 1, max_results: int = 5) -> List[str]:
     """
-    Find PDF or HTML links on the current page using vision AI and traditional methods.
+    Find PDF or HTML links on the current page using vision AI.
     
     Args:
         screenshot_path: Path to the screenshot image
         browser: Selenium WebDriver instance
         is_html: Whether to look for HTML links instead of PDF links
+        min_results: Minimum number of results to return
+        max_results: Maximum number of results to return
         
     Returns:
         List of URLs for the found links
@@ -283,11 +288,15 @@ def find_pdf_links(screenshot_path: str, browser: webdriver.Chrome, is_html: boo
                                     if url not in result_urls:
                                         result_urls.append(url)
                                         logger.info(f"Found {'HTML' if is_html else 'PDF'} link via vision AI text match: {url}")
+                                        
+                                        # If we've reached max_results, stop searching
+                                        if len(result_urls) >= max_results:
+                                            return result_urls
                 except Exception as e:
                     logger.warning(f"Error finding element by text: {str(e)}")
             
-            # Try to find element by position if text search failed
-            if "position" in link_info and len(result_urls) == 0:
+            # Try to find element by position if we need more results
+            if "position" in link_info and len(result_urls) < min_results:
                 try:
                     pos = link_info["position"]
                     script = """
@@ -332,11 +341,15 @@ def find_pdf_links(screenshot_path: str, browser: webdriver.Chrome, is_html: boo
                             if url not in result_urls:
                                 result_urls.append(url)
                                 logger.info(f"Found {'HTML' if is_html else 'PDF'} link via vision AI position match: {url}")
+                                
+                                # If we've reached max_results, stop searching
+                                if len(result_urls) >= max_results:
+                                    return result_urls
                 except Exception as e:
                     logger.warning(f"Error finding element by position: {str(e)}")
     
-    # Fallback: Use traditional methods to find links
-    if len(result_urls) == 0:
+    # Fallback: Use traditional methods to find links if we haven't met minimum requirements
+    if len(result_urls) < min_results:
         logger.info(f"Using traditional methods to find {'HTML' if is_html else 'PDF'} links")
         try:
             # For PDF links, look for links ending with .pdf
@@ -361,18 +374,20 @@ def find_pdf_links(screenshot_path: str, browser: webdriver.Chrome, is_html: boo
                             if url not in result_urls:
                                 result_urls.append(url)
                                 logger.info(f"Found {'HTML' if is_html else 'PDF'} link via traditional method: {url}")
+                                
+                                # If we've reached max_results, stop searching
+                                if len(result_urls) >= max_results:
+                                    break
                 except Exception as e:
                     logger.debug(f"Error getting href attribute: {str(e)}")
         except Exception as e:
-            logger.warning(f"Error finding links with traditional methods: {str(e)}")
+            logger.warning(f"Error finding links with traditional method: {str(e)}")
     
-    # Limit the number of results
-    max_results = 5 if is_html else 10
-    return result_urls[:max_results]
+    return result_urls
 
 def find_search_input(browser: webdriver.Chrome) -> Optional[webdriver.remote.webelement.WebElement]:
     """
-    Find the search input field on the page using vision AI.
+    Find the search input field on the page using traditional DOM methods.
     
     Args:
         browser: Selenium WebDriver instance
@@ -380,142 +395,79 @@ def find_search_input(browser: webdriver.Chrome) -> Optional[webdriver.remote.we
     Returns:
         WebElement for the search input or None if not found
     """
-    # Directly try common search input selectors first (more reliable)
-    logger.info("Trying common search input selectors first")
-    for selector in ["input[type='search']", "input[name='q']", "input[name='query']", 
-                    "input[name='search']", "input[placeholder*='search' i]"]:
+    logger.info("Finding search input using traditional selectors")
+    
+    # Try common search input selectors
+    selectors = [
+        "input[type='search']", 
+        "input[name='q']", 
+        "input[name='query']", 
+        "input[name='search']", 
+        "input[placeholder*='search' i]",
+        "input[id*='search' i]",
+        "input[class*='search' i]",
+        "input[title*='search' i]",
+        ".searchbox input",
+        ".search-box input",
+        ".search-form input",
+        ".searchForm input",
+        "form[action*='search' i] input[type='text']",
+        "input[aria-label*='search' i]"
+    ]
+    
+    for selector in selectors:
         try:
-            element = browser.find_element(By.CSS_SELECTOR, selector)
-            # Skip hidden inputs
-            if element.get_attribute("type") != "hidden" and element.is_displayed():
-                logger.info(f"Found search input using selector: {selector}")
-                return element
-        except NoSuchElementException:
-            continue
+            elements = browser.find_elements(By.CSS_SELECTOR, selector)
+            for element in elements:
+                if element.get_attribute("type") != "hidden" and element.is_displayed():
+                    logger.info(f"Found search input using selector: {selector}")
+                    return element
+        except Exception as e:
+            logger.debug(f"Error with selector '{selector}': {str(e)}")
     
-    # If common selectors didn't work, try vision-based approach
-    logger.info("Common selectors didn't work, trying vision-based approach")
-    
-    # Take a screenshot of the page
-    screenshot_path = take_screenshot(browser, "search_input")
-    
-    # Analyze the screenshot with Gemini Vision
-    prompt = "Find the main search input field on this webpage. Look for text boxes where users can type search queries."
-    result = analyze_screenshot(screenshot_path, prompt)
-    
-    # Check if we got a valid result
-    if result.get("found", False):
-        logger.info("Vision API found something, trying to locate the element")
-        
-        # Try to extract bounding box information
-        bbox = None
-        
-        # Check different possible response formats
-        if "bounding_box" in result:
-            bbox = result["bounding_box"]
-        elif "position" in result:
-            bbox = result["position"]
-        elif "coordinates" in result:
-            bbox = result["coordinates"]
-        
-        # If we have bounding box information, try to use it
-        if bbox and isinstance(bbox, dict):
-            try:
-                # Convert relative coordinates to absolute pixel coordinates
-                window_size = browser.get_window_size()
-                
-                # Handle different coordinate formats
-                x = bbox.get("x", 0)
-                y = bbox.get("y", 0)
-                width = bbox.get("width", 0.2)
-                height = bbox.get("height", 0.05)
-                
-                # If coordinates are given as percentages (0-1), convert to pixels
-                if x <= 1.0:
-                    x = int(x * window_size["width"])
-                if y <= 1.0:
-                    y = int(y * window_size["height"])
-                if width <= 1.0:
-                    width = int(width * window_size["width"])
-                if height <= 1.0:
-                    height = int(height * window_size["height"])
-                
-                # Use JavaScript to find the element at these coordinates
-                script = """
-                function getElementAtPosition(x, y) {
-                    return document.elementFromPoint(x, y);
-                }
-                return getElementAtPosition(arguments[0], arguments[1]);
-                """
-                
-                # Try the center point of the bounding box
-                center_x = x + (width // 2)
-                center_y = y + (height // 2)
-                
-                logger.info(f"Trying to find element at coordinates: ({center_x}, {center_y})")
-                element = browser.execute_script(script, center_x, center_y)
-                
-                if element:
-                    # Skip if the element is hidden
-                    if element.get_attribute("type") == "hidden" or not element.is_displayed():
-                        logger.info("Found element is hidden, skipping")
-                    else:
-                        # If the element is not an input, try to find an input within it or its parent
-                        if element.tag_name.lower() != "input":
-                            logger.info(f"Found element is not an input, it's a {element.tag_name}. Looking for input within it")
-                            try:
-                                # Try to find an input within this element
-                                inputs = element.find_elements(By.TAG_NAME, "input")
-                                for input_element in inputs:
-                                    # Skip hidden inputs
-                                    if input_element.get_attribute("type") != "hidden" and input_element.is_displayed():
-                                        logger.info("Found input element within the element")
-                                        return input_element
-                            except NoSuchElementException:
-                                pass
-                                
-                            # Try the parent element
-                            logger.info("Trying parent element")
-                            parent_script = "return arguments[0].parentElement;"
-                            parent = browser.execute_script(parent_script, element)
-                            try:
-                                inputs = parent.find_elements(By.TAG_NAME, "input")
-                                for input_element in inputs:
-                                    # Skip hidden inputs
-                                    if input_element.get_attribute("type") != "hidden" and input_element.is_displayed():
-                                        logger.info("Found input element in parent")
-                                        return input_element
-                            except NoSuchElementException:
-                                pass
-                        
-                        # If we got here and the element is an input that's not hidden, return it
-                        if element.tag_name.lower() == "input" and element.get_attribute("type") != "hidden" and element.is_displayed():
-                            logger.info("Found input element directly")
-                            return element
-            except Exception as e:
-                logger.error(f"Error using bounding box information: {e}")
-    
-    # If all else fails, try a more aggressive approach with common search patterns
-    logger.info("Trying aggressive approach to find any visible input")
+    # If no specific selectors worked, try a more general approach with text/search inputs
     try:
-        # Try to find any visible input that might be a search box
-        inputs = browser.find_elements(By.TAG_NAME, "input")
-        for input_element in inputs:
-            # Skip hidden inputs and check if it's visible
-            if (input_element.get_attribute("type") != "hidden" and 
-                input_element.is_displayed() and
-                input_element.get_attribute("type") not in ["checkbox", "radio", "submit", "button"]):
-                logger.info("Found potential input element using aggressive approach")
-                return input_element
+        for input_type in ["text", "search"]:
+            elements = browser.find_elements(By.CSS_SELECTOR, f"input[type='{input_type}']")
+            for element in elements:
+                if element.is_displayed() and element.get_attribute("type") != "hidden":
+                    # Check if it looks like a search box
+                    parent = element.find_element(By.XPATH, "./..")
+                    parent_text = parent.text.lower()
+                    parent_html = parent.get_attribute("innerHTML").lower()
+                    
+                    # Look for search-related terms in the parent
+                    if ('search' in parent_text or 
+                        'find' in parent_text or 
+                        'search' in parent_html or 
+                        'magnifi' in parent_html):  # For "magnifying glass" icons
+                        logger.info(f"Found search input by context analysis")
+                        return element
     except Exception as e:
-        logger.error(f"Error in aggressive search approach: {e}")
+        logger.debug(f"Error with context analysis: {str(e)}")
     
-    logger.warning("Could not find search input field")
+    # Last resort: Get all inputs and find the most prominent one
+    try:
+        inputs = browser.find_elements(By.TAG_NAME, "input")
+        visible_inputs = [i for i in inputs if i.is_displayed() and i.get_attribute("type") in ["text", "search", ""]]
+        
+        if visible_inputs:
+            # Find the input with the largest width (usually the main search)
+            largest_input = max(visible_inputs, key=lambda i: 
+                                int(i.get_attribute("offsetWidth") or 0))
+            
+            if int(largest_input.get_attribute("offsetWidth") or 0) > 150:  # Reasonably wide
+                logger.info("Found search input by size analysis")
+                return largest_input
+    except Exception as e:
+        logger.debug(f"Error with size analysis: {str(e)}")
+    
+    logger.warning("No search input found using any method")
     return None
 
 def find_search_button(browser: webdriver.Chrome) -> Optional[webdriver.remote.webelement.WebElement]:
     """
-    Find the search button on the page using vision AI.
+    Find the search button on the page using traditional DOM methods.
     
     Args:
         browser: Selenium WebDriver instance
@@ -523,283 +475,230 @@ def find_search_button(browser: webdriver.Chrome) -> Optional[webdriver.remote.w
     Returns:
         WebElement for the search button or None if not found
     """
-    # Try common search button selectors first (more reliable)
-    logger.info("Trying common search button selectors first")
-    for selector in ["button[type='submit']", "input[type='submit']", "button.search", 
-                    "button[aria-label*='search' i]", "button:has(svg)", "input.search", 
-                    "button[title*='search' i]", "button[name*='search' i]"]:
+    logger.info("Finding search button using traditional selectors")
+    
+    # Try common search button selectors
+    selectors = [
+        "button[type='submit']", 
+        "input[type='submit']", 
+        "button.search", 
+        "button[aria-label*='search' i]", 
+        "button:has(svg)", 
+        "input.search", 
+        "button[title*='search' i]", 
+        "button[name*='search' i]",
+        ".searchbox button",
+        ".search-box button",
+        ".search-form button",
+        ".searchForm button",
+        "form[action*='search' i] button",
+        "form[action*='search' i] input[type='submit']",
+        "button[aria-label*='search' i]",
+        "button i.fa-search",
+        "button i.fa-magnifying-glass",
+        "button svg[title*='search' i]"
+    ]
+    
+    for selector in selectors:
         try:
-            element = browser.find_element(By.CSS_SELECTOR, selector)
-            if element.is_displayed():
-                logger.info(f"Found search button using selector: {selector}")
-                return element
-        except NoSuchElementException:
-            continue
-    
-    # If common selectors didn't work, try vision-based approach
-    logger.info("Common selectors didn't work, trying vision-based approach")
-    
-    # Take a screenshot of the page
-    screenshot_path = take_screenshot(browser, "search_button")
-    
-    # Analyze the screenshot with Gemini Vision
-    prompt = "Find the search button on this webpage. Look for buttons with search icons, magnifying glass icons, or 'Search' text."
-    result = analyze_screenshot(screenshot_path, prompt)
-    
-    if result.get("found", False):
-        logger.info("Vision API found something, trying to locate the element")
-        
-        # Try to extract bounding box information
-        bbox = None
-        
-        # Check different possible response formats
-        if "bounding_box" in result:
-            bbox = result["bounding_box"]
-        elif "position" in result:
-            bbox = result["position"]
-        elif "coordinates" in result:
-            bbox = result["coordinates"]
-        
-        # If we have bounding box information, try to use it
-        if bbox and isinstance(bbox, dict):
-            try:
-                # Convert relative coordinates to absolute pixel coordinates
-                window_size = browser.get_window_size()
-                
-                # Handle different coordinate formats
-                x = bbox.get("x", 0)
-                y = bbox.get("y", 0)
-                width = bbox.get("width", 0.1)
-                height = bbox.get("height", 0.05)
-                
-                # If coordinates are given as percentages (0-1), convert to pixels
-                if x <= 1.0:
-                    x = int(x * window_size["width"])
-                if y <= 1.0:
-                    y = int(y * window_size["height"])
-                if width <= 1.0:
-                    width = int(width * window_size["width"])
-                if height <= 1.0:
-                    height = int(height * window_size["height"])
-                
-                # Use JavaScript to find the element at these coordinates
-                script = """
-                function getElementAtPosition(x, y) {
-                    return document.elementFromPoint(x, y);
-                }
-                return getElementAtPosition(arguments[0], arguments[1]);
-                """
-                
-                # Try the center point of the bounding box
-                center_x = x + (width // 2)
-                center_y = y + (height // 2)
-                
-                logger.info(f"Trying to find element at coordinates: ({center_x}, {center_y})")
-                element = browser.execute_script(script, center_x, center_y)
-                
-                if element and element.is_displayed():
-                    logger.info(f"Found element: {element.tag_name}")
-                    return element
-            except Exception as e:
-                logger.error(f"Error using bounding box information: {e}")
-    
-    # If all else fails, try a more aggressive approach
-    logger.info("Trying aggressive approach to find any visible button")
-    try:
-        # Look for buttons or inputs that might be search buttons
-        for tag in ["button", "input[type='submit']", "input[type='button']"]:
-            elements = browser.find_elements(By.CSS_SELECTOR, tag)
+            elements = browser.find_elements(By.CSS_SELECTOR, selector)
             for element in elements:
                 if element.is_displayed():
-                    # Check if it has search-related text or attributes
-                    text = element.text.lower()
-                    if "search" in text or "find" in text or "go" in text:
-                        logger.info(f"Found potential search button with text: {text}")
-                        return element
-                    
-                    # Check attributes
-                    for attr in ["title", "aria-label", "name", "id", "class"]:
-                        attr_value = element.get_attribute(attr)
-                        if attr_value and ("search" in attr_value.lower() or "find" in attr_value.lower()):
-                            logger.info(f"Found potential search button with {attr}: {attr_value}")
-                            return element
+                    logger.info(f"Found search button using selector: {selector}")
+                    return element
+        except Exception as e:
+            logger.debug(f"Error with selector '{selector}': {str(e)}")
+    
+    # Look for buttons with common search icons or text
+    try:
+        buttons = browser.find_elements(By.TAG_NAME, "button")
+        for button in buttons:
+            if not button.is_displayed():
+                continue
+                
+            button_text = button.text.lower()
+            button_html = button.get_attribute("innerHTML").lower()
+            
+            # Check for search-related text or icons
+            if ('search' in button_text or 
+                'find' in button_text or 
+                'search' in button_html or 
+                'magnifi' in button_html or  # For "magnifying glass" icons
+                '🔍' in button_html):  # Search emoji
+                logger.info("Found search button by text/content analysis")
+                return button
     except Exception as e:
-        logger.error(f"Error in aggressive search approach: {e}")
+        logger.debug(f"Error with button analysis: {str(e)}")
     
-        # Convert relative coordinates to absolute pixel coordinates
-        window_size = browser.get_window_size()
-        x = int(bbox.get("x", 0) * window_size["width"])
-        y = int(bbox.get("y", 0) * window_size["height"])
-        width = int(bbox.get("width", 0) * window_size["width"])
-        height = int(bbox.get("height", 0) * window_size["height"])
-        
-        # Use JavaScript to find the element at these coordinates
-        script = """
-        function getElementAtPosition(x, y) {
-            return document.elementFromPoint(x, y);
-        }
-        return getElementAtPosition(arguments[0], arguments[1]);
-        """
-        
-        # Try the center point of the bounding box
-        center_x = x + (width // 2)
-        center_y = y + (height // 2)
-        
-        element = browser.execute_script(script, center_x, center_y)
-        return element
+    # Try finding the button near the search input
+    try:
+        search_input = find_search_input(browser)
+        if search_input:
+            # Get the parent form or container
+            parent = search_input.find_element(By.XPATH, "./..")
+            
+            # Look for submit buttons within the parent
+            submit_buttons = parent.find_elements(By.CSS_SELECTOR, "button, input[type='submit']")
+            if submit_buttons:
+                for button in submit_buttons:
+                    if button.is_displayed():
+                        logger.info("Found search button near search input")
+                        return button
+    except Exception as e:
+        logger.debug(f"Error finding button near search input: {str(e)}")
     
-    # Fallback to common search button selectors if vision AI fails
-    for selector in ["button[type='submit']", "input[type='submit']", "button.search", 
-                    "button[aria-label*='search' i]", "button:has(svg)"]:
-        try:
-            return browser.find_element(By.CSS_SELECTOR, selector)
-        except NoSuchElementException:
-            continue
-    
+    # If no button found, the search might work with Enter key
+    logger.info("No search button found. Search might work with Enter key.")
     return None
 
-def find_result_elements(browser: webdriver.Chrome, max_results: int = 10) -> List[webdriver.remote.webelement.WebElement]:
+def find_result_elements(browser: webdriver.Chrome, min_results: int = 3, max_results: int = 10) -> List[webdriver.remote.webelement.WebElement]:
     """
-    Find the search result elements on the page using vision AI.
+    Find the search result elements on the page using traditional DOM methods.
     
     Args:
         browser: Selenium WebDriver instance
+        min_results: Minimum number of results to return
         max_results: Maximum number of results to return
         
     Returns:
         List of WebElements for the search results
     """
-    # Take a screenshot of the page
-    screenshot_path = take_screenshot(browser, "search_results")
-    
-    # Analyze the screenshot with Gemini Vision
-    prompt = "Find the search results on this webpage. Identify the container with search results and individual result items."
-    result = analyze_screenshot(screenshot_path, prompt)
+    logger.info("Finding search results using traditional selectors")
     
     result_elements = []
     
-    if result.get("found", False) and "result_items" in result:
-        # Get the window size
-        window_size = browser.get_window_size()
+    # Common search result selectors for different search engines
+    result_selectors = [
+        # Google
+        ".g .yuRUbf", "div.g", ".rc", "div.tF2Cxc", "div.yuRUbf", ".card-section", 
         
-        # Process each result item
-        for i, item_bbox in enumerate(result["result_items"]):
-            if i >= max_results:
-                break
-                
-            # Convert relative coordinates to absolute pixel coordinates
-            x = int(item_bbox.get("x", 0) * window_size["width"])
-            y = int(item_bbox.get("y", 0) * window_size["height"])
-            
-            # Use JavaScript to find the element at these coordinates
-            script = """
-            function getElementAtPosition(x, y) {
-                return document.elementFromPoint(x, y);
-            }
-            return getElementAtPosition(arguments[0], arguments[1]);
-            """
-            
-            element = browser.execute_script(script, x, y)
-            
-            # Add to results if not already included
-            if element and element not in result_elements:
-                result_elements.append(element)
+        # DuckDuckGo
+        ".result", ".results--main .result", ".web-result", ".nrn-react-div",
+        
+        # Bing
+        ".b_algo", ".b_results .b_algo", "#b_results .b_algo",
+        
+        # Yahoo
+        ".algo", ".algo-sr", ".searchCenterMiddle li", 
+        
+        # General selectors that might work across search engines
+        ".result", ".search-result", ".searchResult", ".result-item", "article", ".card"
+    ]
     
-    # If vision AI didn't find enough results, try common result selectors
-    if len(result_elements) < max_results:
-        for selector in [".result", ".search-result", ".item", "article", 
-                        "[class*='result']", "[class*='item']", ".card"]:
-            try:
-                elements = browser.find_elements(By.CSS_SELECTOR, selector)
-                if elements:
-                    # Add elements not already in result_elements
-                    for element in elements:
-                        if element not in result_elements:
-                            result_elements.append(element)
+    # Try each selector
+    for selector in result_selectors:
+        try:
+            elements = browser.find_elements(By.CSS_SELECTOR, selector)
+            if elements and len(elements) > 0:
+                logger.info(f"Found {len(elements)} search results with selector: {selector}")
+                
+                # Keep only visible elements
+                visible_elements = [e for e in elements if e.is_displayed()]
+                
+                # Add to result_elements up to max_results
+                for element in visible_elements[:max_results]:
+                    if element not in result_elements:
+                        result_elements.append(element)
+                
+                if len(result_elements) >= min_results:
+                    logger.info(f"Found {len(result_elements)} result elements, which meets the minimum requirement")
+                    return result_elements[:max_results]
+        except Exception as e:
+            logger.debug(f"Error with selector '{selector}': {str(e)}")
+    
+    # If we didn't find enough results with specific selectors, look for links that look like results
+    if len(result_elements) < min_results:
+        try:
+            # Find all links
+            links = browser.find_elements(By.TAG_NAME, "a")
+            
+            # Process only visible links with sufficient text
+            for link in links:
+                if not link.is_displayed():
+                    continue
+                    
+                # Check if the link has substantial text (likely a search result)
+                link_text = link.text.strip()
+                if link_text and len(link_text) > 20:  # Arbitrary threshold for meaningful content
+                    # Check if it has an href attribute
+                    href = link.get_attribute("href")
+                    if href and href.startswith("http"):
+                        # Add the link to results if it's not already included
+                        if link not in result_elements:
+                            result_elements.append(link)
+                            
                             if len(result_elements) >= max_results:
                                 break
-                    
-                    if len(result_elements) >= max_results:
-                        break
-            except Exception:
-                continue
+        except Exception as e:
+            logger.debug(f"Error finding links as results: {str(e)}")
     
+    logger.info(f"Found {len(result_elements)} result elements using traditional methods")
     return result_elements[:max_results]
 
 def extract_result_data(result_element: webdriver.remote.webelement.WebElement) -> Dict[str, Any]:
     """
-    Extract structured data from a search result element.
+    Extract data from a search result element.
     
     Args:
         result_element: WebElement for the search result
         
     Returns:
-        Dictionary with extracted data
+        Dictionary with result data
     """
-    result_data = {}
+    result_data = {
+        "title": "",
+        "link": "",
+        "description": "",
+        "is_pdf": False
+    }
     
-    # Extract title
     try:
-        # Try common title selectors
-        for selector in ["h1", "h2", "h3", "h4", ".title", "[class*='title']", 
-                        "[class*='name']", "a", "strong"]:
-            try:
-                title_element = result_element.find_element(By.CSS_SELECTOR, selector)
-                title = title_element.text.strip()
-                if title:
-                    result_data["title"] = title
-                    break
-            except NoSuchElementException:
-                continue
+        # Try to find the link within the result
+        links = result_element.find_elements(By.TAG_NAME, "a")
+        for link in links:
+            href = link.get_attribute("href")
+            if href and href.startswith("http"):
+                result_data["link"] = href
+                # Check if it's a PDF
+                if href.lower().endswith(".pdf"):
+                    result_data["is_pdf"] = True
+                break
         
-        # If no title found, use the element's text as title
-        if "title" not in result_data:
-            result_data["title"] = result_element.text.strip()
+        # If the element itself is a link, use its href
+        if not result_data["link"]:
+            if result_element.tag_name == "a":
+                href = result_element.get_attribute("href")
+                if href:
+                    result_data["link"] = href
+                    if href.lower().endswith(".pdf"):
+                        result_data["is_pdf"] = True
+        
+        # Extract title - look for heading tags or elements with title-like classes
+        title_candidates = result_element.find_elements(
+            By.CSS_SELECTOR, "h2, h3, h4, .title, .result-title, [class*='title'], [class*='heading']"
+        )
+        if title_candidates:
+            result_data["title"] = title_candidates[0].text.strip()
+        
+        # If no specific title found, use the text of the first link
+        if not result_data["title"] and links:
+            result_data["title"] = links[0].text.strip()
+        
+        # Extract description
+        desc_candidates = result_element.find_elements(
+            By.CSS_SELECTOR, ".snippet, .description, [class*='desc'], [class*='snippet'], [class*='summary']"
+        )
+        if desc_candidates:
+            result_data["description"] = desc_candidates[0].text.strip()
+        
+        # If no description found, get all text and remove the title
+        if not result_data["description"]:
+            full_text = result_element.text.strip()
+            if result_data["title"] and result_data["title"] in full_text:
+                desc_text = full_text.replace(result_data["title"], "", 1).strip()
+                result_data["description"] = desc_text
+        
     except Exception as e:
-        logger.warning(f"Error extracting title: {e}")
-    
-    # Extract link
-    try:
-        link_element = result_element.find_element(By.TAG_NAME, "a")
-        link = link_element.get_attribute("href")
-        if link:
-            result_data["link"] = link
-    except NoSuchElementException:
-        pass
-    
-    # Extract snippet/description
-    try:
-        for selector in ["p", "[class*='description']", "[class*='snippet']", 
-                        "[class*='text']", "[class*='content']", "div"]:
-            try:
-                snippet_element = result_element.find_element(By.CSS_SELECTOR, selector)
-                snippet = snippet_element.text.strip()
-                if snippet and snippet != result_data.get("title", ""):
-                    result_data["snippet"] = snippet
-                    break
-            except NoSuchElementException:
-                continue
-    except Exception as e:
-        logger.warning(f"Error extracting snippet: {e}")
-    
-    # Extract other common data fields
-    for field, selectors in [
-        ("authors", ["[class*='author']", "[class*='by']", ".meta"]),
-        ("date", ["[class*='date']", "time", "[datetime]"]),
-        ("price", ["[class*='price']"]),
-        ("rating", ["[class*='rating']", "[class*='stars']"])
-    ]:
-        try:
-            for selector in selectors:
-                try:
-                    element = result_element.find_element(By.CSS_SELECTOR, selector)
-                    value = element.text.strip()
-                    if value:
-                        result_data[field] = value
-                        break
-                except NoSuchElementException:
-                    continue
-        except Exception:
-            pass
+        logger.warning(f"Error extracting result data: {str(e)}")
     
     return result_data 

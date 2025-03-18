@@ -85,7 +85,8 @@ def search(query: str, settings: Dict[str, Any]) -> List[Dict[str, Any]]:
         
         # Find the search result elements using AI vision
         logger.info("Using AI vision to find search results")
-        result_elements = find_result_elements(browser, max_results)
+        min_results = settings.get('min_results', 3)  # Get min_results from settings or use default
+        result_elements = find_result_elements(browser, min_results=min_results, max_results=max_results)
         
         if not result_elements:
             logger.warning("No search results found on ArXiv")
@@ -143,8 +144,10 @@ def search(query: str, settings: Dict[str, Any]) -> List[Dict[str, Any]]:
                     # Wait for results to load
                     time.sleep(3)
                     
-                    # Find additional result elements
-                    additional_elements = find_result_elements(browser, max_results - len(results))
+                    # Find more results
+                    logger.info("Looking for more results on the next page")
+                    remaining_results = max_results - len(results)
+                    additional_elements = find_result_elements(browser, min_results=min(min_results, remaining_results), max_results=remaining_results)
                     
                     if additional_elements:
                         logger.info(f"Found {len(additional_elements)} additional result elements")

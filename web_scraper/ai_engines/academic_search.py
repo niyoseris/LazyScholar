@@ -85,7 +85,8 @@ def search(query: str, settings: Dict[str, Any]) -> List[Dict[str, Any]]:
         
         # Find the search result elements using AI vision
         logger.info("Using AI vision to find search results")
-        result_elements = find_result_elements(browser, max_results)
+        min_results = settings.get('min_results', 3)  # Get min_results from settings or use default
+        result_elements = find_result_elements(browser, min_results=min_results, max_results=max_results)
         
         if not result_elements:
             logger.warning("No search results found on Google Scholar")
@@ -154,7 +155,7 @@ def search(query: str, settings: Dict[str, Any]) -> List[Dict[str, Any]]:
                 time.sleep(3)
                 
                 # Find the search result elements using AI vision
-                result_elements = find_result_elements(browser, remaining_results)
+                result_elements = find_result_elements(browser, min_results=min(min_results, remaining_results), max_results=remaining_results)
                 
                 if not result_elements:
                     logger.warning("No search results found on ResearchGate")

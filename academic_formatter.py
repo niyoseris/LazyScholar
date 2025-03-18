@@ -43,6 +43,33 @@ if not GOOGLE_API_KEY:
 # Configure Google Generative AI
 genai.configure(api_key=GOOGLE_API_KEY)
 
+def api_call_with_retry(func, max_retries=5, initial_delay=2):
+    """Execute an API call with retry logic and exponential backoff for rate limiting."""
+    retry_count = 0
+    delay = initial_delay
+    
+    while retry_count < max_retries:
+        try:
+            return func()
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str or "quota" in error_str.lower() or "exhausted" in error_str.lower():
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Maximum retries reached. Last error: {error_str}")
+                    raise
+                
+                wait_time = delay * (4 ** (retry_count - 1))  # Exponential backoff
+                logger.warning(f"API quota exhausted. Waiting {wait_time} seconds before retry {retry_count}/{max_retries}...")
+                time.sleep(wait_time)
+            else:
+                # If it's not a quota error, re-raise immediately
+                logger.error(f"API error (not quota related): {error_str}")
+                raise
+    
+    # This should not be reached due to the raise in the loop
+    raise Exception("Maximum retries exceeded")
+
 def initialize_model():
     """Initialize the Gemini model for text generation."""
     try:
@@ -63,14 +90,27 @@ def initialize_model():
         
         # Test the model with a simple prompt
         test_prompt = "Respond with 'OK' if you can process this message."
-        response = model.generate_content(test_prompt)
         
-        if response and hasattr(response, 'text'):
-            logger.info("Successfully initialized Gemini model")
+        def test_model():
+            return model.generate_content(test_prompt)
+        
+        # Use the retry mechanism for the test call
+        try:
+            response = api_call_with_retry(test_model, max_retries=5, initial_delay=5)
+            
+            if response and hasattr(response, 'text'):
+                logger.info("Successfully initialized Gemini model")
+                return model
+            else:
+                logger.error("Failed to get valid response from Gemini model")
+                return None
+        except Exception as e:
+            logger.error(f"Model initialization test failed after retries: {str(e)}")
+            # Even though the test failed, return the model object anyway
+            # This allows the caller to handle the failure gracefully
+            logger.warning("Returning model object despite test failure - operations may be limited")
             return model
-        else:
-            logger.error("Failed to get valid response from Gemini model")
-            return None
+            
     except Exception as e:
         logger.error(f"Error initializing Gemini model: {str(e)}")
         return None
@@ -374,33 +414,6 @@ def generate_academic_citations(pdf_paths):
             citations.append(f"{base_name}")
     
     return citations
-
-def api_call_with_retry(func, max_retries=5, initial_delay=2):
-    """Execute an API call with retry logic and exponential backoff for rate limiting."""
-    retry_count = 0
-    delay = initial_delay
-    
-    while retry_count < max_retries:
-        try:
-            return func()
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "quota" in error_str.lower() or "exhausted" in error_str.lower():
-                retry_count += 1
-                if retry_count >= max_retries:
-                    logger.error(f"Maximum retries reached. Last error: {error_str}")
-                    raise
-                
-                wait_time = delay * (4 ** (retry_count - 1))  # Exponential backoff
-                logger.warning(f"API quota exhausted. Waiting {wait_time} seconds before retry {retry_count}/{max_retries}...")
-                time.sleep(wait_time)
-            else:
-                # If it's not a quota error, re-raise immediately
-                logger.error(f"API error (not quota related): {error_str}")
-                raise
-    
-    # This should not be reached due to the raise in the loop
-    raise Exception("Maximum retries exceeded")
 
 def detect_language(model, text, default_language="en"):
     """Detect the language of a text with retry mechanism."""

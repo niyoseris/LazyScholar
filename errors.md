@@ -2780,3 +2780,255 @@ For methods that expected error message returns from API call failures (like `_e
 7. **Persistent caching**: Save previous responses to disk for resuming after rate limit errors.
 
 8. **Progress preservation**: Enable research to be paused and resumed when limits are encountered.
+
+## Web Scraper Errors and Fixes
+
+### 2023-09-15 - Vision Helper Minimum/Maximum Results
+
+#### Issue
+The `vision_helper.py` module didn't properly handle minimum and maximum result requirements in the following functions:
+- `find_pdf_links`: Only had a `max_results` parameter that was being reset inside the function
+- `find_result_elements`: Had `max_results` parameter but no minimum threshold
+
+#### Fix
+1. Modified `find_pdf_links` function:
+   - Added `min_results` parameter with default value of 1
+   - Improved logic to continue searching if minimum results aren't met
+   - Added early return when max_results is reached 
+   - Fixed hardcoded overwrite of max_results parameter
+   - Added warning logs when minimum results can't be found
+
+2. Modified `find_result_elements` function:
+   - Added `min_results` parameter with default value of 3
+   - Improved logging to indicate when vision AI doesn't find enough results
+   - Added early return when max_results is reached
+   - Added warning logs when minimum results can't be found
+
+#### Benefits
+- Better control over the number of results returned
+- More reliable scraping with minimum result thresholds
+- Improved performance by stopping search once maximum results are found
+- Better logging for debugging when minimum results can't be met
+
+## UI Parameter Integration Issues
+
+### 2023-09-16 - Missing Min/Max Result Parameters from UI to Vision Helper
+
+#### Issue
+The `find_pdf_links` function in `vision_helper.py` was updated to support both minimum and maximum result parameters, but in `lazy_scholar.py`, only the `max_results` parameter was being passed from the UI settings. This could result in the vision helper not finding enough links to satisfy the user's minimum requirement setting.
+
+#### Fix
+1. Updated the `find_pdf_links` function call in `lazy_scholar.py` to pass both parameters:
+   ```python
+   links = find_pdf_links(screenshot_path, self.browser, is_html=True, 
+                         min_results=self.minimum_pdfs, 
+                         max_results=self.max_pdfs_per_topic)
+   ```
+
+2. This ensures that:
+   - The vision helper will try to find at least the minimum number of links specified in the UI
+   - The vision helper will stop searching once it finds the maximum number
+   - The system properly respects user preferences for min/max content items
+
+#### Benefits
+- Improved user control over search results
+- Better alignment between UI settings and actual search behavior  
+- More predictable search results based on user preferences
+- More efficient searching by respecting both the minimum threshold and maximum limit
+
+### 2023-09-16 - Missing Min/Max Result Parameters in Web Scraper Modules
+
+#### Issue
+After adding min_results parameter to the vision helper functions, we found that the web_scraper AI engine modules weren't passing the min_results parameter when calling these functions. This could lead to inconsistent behavior where:
+1. The UI would set minimum result requirements
+2. LazyScholar would pass these to vision helper
+3. But web_scraper modules would ignore them and use default values
+
+#### Fix
+Updated all instances of `find_result_elements` function calls across web_scraper modules:
+
+1. In arxiv_search.py:
+   ```python
+   # Original
+   result_elements = find_result_elements(browser, max_results)
+   additional_elements = find_result_elements(browser, max_results - len(results))
+   
+   # Updated
+   min_results = settings.get('min_results', 3)
+   result_elements = find_result_elements(browser, min_results=min_results, max_results=max_results)
+   remaining_results = max_results - len(results)
+   additional_elements = find_result_elements(browser, min_results=min(min_results, remaining_results), max_results=remaining_results)
+   ```
+
+2. Similar updates in:
+   - academic_search.py
+   - custom_search.py
+   - web_search.py
+
+#### Benefits
+- Consistent minimum result handling across all modules
+- All search functionality now respects user preferences
+- Improved search reliability with proper minimum thresholds
+- Better user experience with predictable search behavior
+
+This update completes the integration of min/max result parameters throughout the entire codebase, ensuring consistent behavior regardless of which search module is used.
+
+## LazyScholar Errors
+
+### Error: "name 'subtopic_title' is not defined"
+
+**Description:**
+The error "name 'subtopic_title' is not defined" occurs when writing a subtopic file. This suggests that a variable named `subtopic_title` is being used but wasn't defined in the scope where it's being referenced.
+
+**Possible Locations:**
+- In the exception handling code in `_write_subtopic_file` method around line 2126
+- In the `_process_pdfs_for_subtopic` method around lines 1914 and 1944
+
+**Potential Fixes:**
+1. Check if variable naming is consistent between function parameters and usage
+2. Verify that the variable is properly defined before the error occurs
+3. Ensure the correct variable name is used (possibly should be using just `subtopic` instead of `subtopic_title` in some locations)
+
+**Implemented Solution:**
+The issue was in the `_process_pdfs_for_subtopic` method where it was using `subtopic_title` and `topic_title` variables that weren't defined. These were replaced with the function parameters `subtopic` and `topic` respectively. Also confirmed that the `_write_subtopic_file` method was using the correct variable name `subtopic`.
+
+**Specific Changes:**
+1. Replaced all instances of `subtopic_title` with `subtopic` in the `_process_pdfs_for_subtopic` method
+2. Replaced all instances of `topic_title` with `topic` in the `_process_pdfs_for_subtopic` method
+
+**Expected Behavior:**
+The code should now correctly use the function parameters when writing the subtopic files, eliminating the "name 'subtopic_title' is not defined" error.
+
+### Error: LazyScholar switches to HTML content when focus is set to 'pdf'
+
+**Description:**
+When the `focus` parameter is set to 'pdf', LazyScholar still attempts to extract HTML content if the minimum number of PDFs isn't found, which contradicts the intended behavior of focusing only on PDF content.
+
+**Possible Locations:**
+- In the research process code around line 1183 where it decides to add HTML content
+- In the "final attempt" code around line 1226 where it tries HTML content when no PDFs are found
+
+**Potential Fixes:**
+1. Modify the code to check the `focus` parameter before switching to HTML content extraction
+2. Only extract HTML content when `focus` is not explicitly set to 'pdf'
+3. Apply the same check in both regular content extraction and the final attempt flow
+
+**Implemented Solution:**
+Added conditions to check if `self.focus` is set to 'pdf' before extracting HTML content in both the main flow and the final attempt flow. If the focus is PDF-only, it logs a message and skips HTML content extraction even if the minimum PDF requirement isn't met or no PDFs were found.
+
+**Specific Changes:**
+1. Added an if-else condition in the main content extraction logic that checks `self.focus != 'pdf'`
+2. Added a similar if-else condition in the final attempt logic that also checks `self.focus != 'pdf'`
+3. Added appropriate logging to indicate when HTML content extraction is being skipped due to PDF-only focus
+
+**Expected Behavior:**
+The application should now respect the 'pdf' focus setting throughout the entire research process and not attempt to extract HTML content at any point when the focus is explicitly set to PDF files only.
+
+### Error: "Error initializing Gemini model: 429 Resource has been exhausted (e.g. check quota)"
+
+**Description:**
+When formatting the final paper as an academic paper, the application is encountering a rate limit error (HTTP 429) from the Gemini API, indicating that the API quota has been exhausted.
+
+**Possible Locations:**
+- In the `academic_formatter.py` file where it initializes the Gemini model for academic formatting
+
+**Potential Fixes:**
+1. Implement exponential backoff and retry mechanism for API calls
+2. Add better error handling to gracefully degrade when API limits are reached
+3. Consider using a different API key or increasing quota limits with Google
+
+**Implemented Solution:**
+Enhanced the model initialization process in `academic_formatter.py` to use the existing `api_call_with_retry` function, which implements exponential backoff for rate-limited API calls.
+
+**Specific Changes:**
+1. Moved the `api_call_with_retry` function definition to appear earlier in the file (before it's used)
+2. Modified the `initialize_model` function to use this retry mechanism when testing the model connection
+3. Added fallback behavior to return the model object even if the test fails, allowing the application to continue with limited functionality
+4. Increased the initial delay between retries to 5 seconds to give more time for quota to refresh
+
+**Expected Behavior:**
+The application should now handle API rate limits gracefully during model initialization. It will:
+1. Automatically retry API calls with exponential backoff when encountering rate limits
+2. Log appropriate warnings during the retry process
+3. Continue operation with limited functionality even if the model test fails after all retries
+
+# Vision Usage Optimization
+
+## Errors & Issues
+
+1. **Excessive Vision API Usage**: Vision was being used in multiple places throughout the application including:
+   - Search input detection
+   - Search button detection
+   - Link detection on search pages
+   - Result element detection
+
+2. **Performance Impact**: Using vision for all these operations was causing the research process to take longer than necessary and potentially increasing API costs.
+
+## Solution
+
+1. **Restricted Vision to Link Detection Only**: Modified the code to only use vision for detecting links on search pages, which is the most critical use case.
+
+2. **Replaced Other Vision Uses**: Implemented traditional DOM-based methods for other operations:
+   - Finding search input fields - now uses common selectors and DOM analysis
+   - Finding search buttons - now uses common selectors and contextual analysis
+   - Finding result elements - now uses platform-specific selectors for different search engines
+
+## Implementation Details
+
+1. **Modified Functions in `web_scraper/ai_engines/vision_helper.py`**:
+   - `find_search_input()` - Replaced vision-based implementation with traditional DOM-based selectors
+   - `find_search_button()` - Replaced vision-based implementation with traditional DOM-based selectors
+   - `find_result_elements()` - Replaced vision-based implementation with search engine specific selectors
+   - Kept `find_pdf_links()` using vision since link detection is the primary use case
+
+2. **Benefits of Changes**:
+   - Faster execution time
+   - Reduced API usage and costs
+   - More reliable element detection in some cases
+   - Maintained the key benefit of vision for accurate link detection
+
+3. **Technical Improvements**:
+   - Added more comprehensive selectors for different search engines
+   - Improved fallback mechanisms when primary selectors don't work
+   - Added better contextual analysis for search elements
+
+These changes should significantly reduce the time required for the research process while maintaining the quality of the research results.
+
+# Other Known Issues
+
+// ... existing code ...
+
+# Full-Page Screenshot Removal
+
+## Issue
+
+1. **Performance Impact**: The application was taking full-page screenshots of every web page visited during the research process, which:
+   - Required resizing the browser window
+   - Used JavaScript to calculate full page height
+   - Consumed extra processing time
+   - Created large image files
+
+2. **Unnecessary for Core Functionality**: Full-page screenshots were not essential for the application's core functionality and were mainly used for debugging.
+
+## Solution
+
+1. **Removed Full-Page Screenshot Logic**: Modified the code to:
+   - Take normal viewport screenshots instead of full-page screenshots
+   - Eliminate window resizing operations
+   - Remove the JavaScript execution for page height calculation
+   - Simplify the screenshot logging
+
+2. **Locations Modified**:
+   - Search results pages screenshots
+   - Link detection screenshots
+   - Individual web page screenshots
+
+3. **Benefits**:
+   - Faster page processing
+   - Lower memory usage
+   - Smaller output file sizes
+   - Streamlined application flow
+
+# Vision Usage Optimization
+
+// ... existing content ...

@@ -83,7 +83,8 @@ def search(query: str, website_url: str, settings: Dict[str, Any]) -> List[Dict[
         
         # Find the search result elements using AI vision
         logger.info("Using AI vision to find search results")
-        result_elements = find_result_elements(browser, max_results)
+        min_results = settings.get('min_results', 3)  # Get min_results from settings or use default
+        result_elements = find_result_elements(browser, min_results=min_results, max_results=max_results)
         
         if not result_elements:
             logger.warning("No search results found")
