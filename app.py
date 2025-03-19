@@ -101,7 +101,7 @@ class ResearchProgress:
 def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=True, 
                 language='en', search_suffix=None, headless=True, site_tld=None,
                 minimum_pdfs=3, crawl_depth=3, max_crawl_pages=20, search_purpose='academic',
-                require_pdfs=True, task_id=None, search_engine=None):
+                require_pdfs=True, task_id=None, search_engine=None, output_format='md', translate_to=None):
     """
     Wrapper function for LazyScholar to handle research process
     
@@ -121,6 +121,8 @@ def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=Tru
         require_pdfs (bool): Whether PDFs are required for the search
         task_id (str): Unique identifier for tracking progress
         search_engine (str): Search engine URL to use for research
+        output_format (str): Format for the final paper ('md', 'pdf', 'html', 'epub', etc.)
+        translate_to (str): Target language for translation (if requested)
         
     Returns:
         bool: True if research completed successfully, False otherwise
@@ -213,7 +215,9 @@ def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=Tru
             crawl_depth=crawl_depth,
             max_crawl_pages=max_crawl_pages,
             search_purpose=search_purpose,
-            require_pdfs=require_pdfs
+            require_pdfs=require_pdfs,
+            output_format=output_format,
+            translate_to=translate_to
         )
         
         # Execute research
@@ -310,6 +314,8 @@ class ResearchProfile(db.Model):
     max_crawl_pages = db.Column(db.Integer, default=20)  # Maximum number of pages to visit during crawling
     search_purpose = db.Column(db.String(20), default='academic')  # Purpose of the search: 'academic', 'practical', or 'travel'
     require_pdfs = db.Column(db.Boolean, default=True)  # Whether PDFs are required for the search
+    output_format = db.Column(db.String(10), default='md')  # Output format: 'md', 'pdf', 'html', 'epub', etc.
+    translate_to = db.Column(db.String(10))  # Target language for translation (if requested)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
@@ -378,6 +384,8 @@ def new_profile():
             max_crawl_pages=int(request.form.get('max_crawl_pages', 20)),
             search_purpose=request.form.get('search_purpose', 'academic'),
             require_pdfs='require_pdfs' in request.form,
+            output_format=request.form.get('output_format', 'md'),
+            translate_to=request.form.get('translate_to'),
             user_id=current_user.id
         )
         db.session.add(profile)
@@ -530,7 +538,9 @@ def start_research(profile_id):
                 search_purpose=profile.search_purpose,
                 require_pdfs=profile.require_pdfs,
                 task_id=task_id,
-                search_engine=profile.search_url  # Pass the search URL from the profile
+                search_engine=profile.search_url,  # Pass the search URL from the profile
+                output_format=profile.output_format,
+                translate_to=profile.translate_to
             )
         except Exception as e:
             app.logger.error(f"Research error for profile {profile_id}: {str(e)}")
@@ -607,6 +617,8 @@ def edit_profile(profile_id):
         profile.max_crawl_pages = int(request.form.get('max_crawl_pages', 20))
         profile.search_purpose = request.form.get('search_purpose', 'academic')
         profile.require_pdfs = 'require_pdfs' in request.form
+        profile.output_format = request.form.get('output_format', 'md')
+        profile.translate_to = request.form.get('translate_to')
         
         db.session.commit()
         flash('Profile updated successfully')
@@ -651,7 +663,9 @@ def get_template(template_id):
         'crawl_depth': template.crawl_depth,
         'max_crawl_pages': template.max_crawl_pages,
         'search_purpose': template.search_purpose,
-        'require_pdfs': template.require_pdfs
+        'require_pdfs': template.require_pdfs,
+        'output_format': template.output_format,
+        'translate_to': template.translate_to
     })
 
 @app.route('/api/progress/<task_id>')

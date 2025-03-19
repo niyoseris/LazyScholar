@@ -44,6 +44,26 @@
                                     <h6>Academic Format</h6>
                                     <p class="text-muted">{{ "Yes" if profile.academic_format else "No" }}</p>
                                 </div>
+                                {% if profile.translate_to %}
+                                <div class="col-6">
+                                    <h6>Translation</h6>
+                                    <p class="text-muted">
+                                        {% if profile.translate_to == 'en' %}English
+                                        {% elif profile.translate_to == 'tr' %}Turkish
+                                        {% elif profile.translate_to == 'es' %}Spanish
+                                        {% elif profile.translate_to == 'fr' %}French
+                                        {% elif profile.translate_to == 'de' %}German
+                                        {% elif profile.translate_to == 'it' %}Italian
+                                        {% elif profile.translate_to == 'pt' %}Portuguese
+                                        {% elif profile.translate_to == 'ru' %}Russian
+                                        {% elif profile.translate_to == 'zh' %}Chinese
+                                        {% elif profile.translate_to == 'ja' %}Japanese
+                                        {% elif profile.translate_to == 'ar' %}Arabic
+                                        {% else %}{{ profile.translate_to }}
+                                        {% endif %}
+                                    </p>
+                                </div>
+                                {% endif %}
                                 {% if profile.search_suffix %}
                                 <div class="col-12">
                                     <h6>Search Suffix</h6>
@@ -264,7 +284,7 @@
                     {% else %}
                     <!-- Static progress display -->
                     <div class="progress mb-3">
-                        <div class="progress-bar" role="progressbar" style="width: {{ progress }}%">{{ progress }}%</div>
+                        <div class="progress-bar" role="progressbar" data-progress="{{ progress }}" style="width: {{ progress }}%">{{ progress }}%</div>
                     </div>
                     <div class="list-group">
                         {% for step in progress_steps %}

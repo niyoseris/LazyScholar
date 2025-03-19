@@ -100,7 +100,7 @@ def ensure_directory(directory_path: str) -> str:
 class LazyScholar:
     """Main class for the LazyScholar application."""
     
-    def __init__(self, headless: bool = False, output_dir: str = "research_output", timeout: int = 120, search_suffix: str = "", max_pdfs_per_topic: int = 10, focus: str = "all", academic_format: bool = False, language: str = "en", site_tld: str = None, minimum_pdfs: int = 3, crawl_depth: int = 3, max_crawl_pages: int = 20, search_purpose: str = "academic", require_pdfs: bool = True, max_references_per_subtopic: int = 10):
+    def __init__(self, headless: bool = False, output_dir: str = "research_output", timeout: int = 120, search_suffix: str = "", max_pdfs_per_topic: int = 10, focus: str = "all", academic_format: bool = False, language: str = "en", site_tld: str = None, minimum_pdfs: int = 3, crawl_depth: int = 3, max_crawl_pages: int = 20, search_purpose: str = "academic", require_pdfs: bool = True, max_references_per_subtopic: int = 10, output_format: str = "md", translate_to: str = None):
         """
         Initialize the LazyScholar instance.
         
@@ -120,6 +120,8 @@ class LazyScholar:
             search_purpose (str): Purpose of the search ('academic', 'practical', or 'travel')
             require_pdfs (bool): Whether PDFs are required for the search
             max_references_per_subtopic (int): Maximum number of references to collect per subtopic (default: 10)
+            output_format (str): Format for the final output ('md', 'pdf', 'html', 'epub', etc.) (default: 'md')
+            translate_to (str): Target language code to translate the final paper to (e.g., 'en', 'tr', 'es')
         """
         # Import required modules
         import google.generativeai as genai
@@ -141,6 +143,8 @@ class LazyScholar:
         self.max_crawl_pages = max_crawl_pages
         self.search_purpose = search_purpose
         self.require_pdfs = require_pdfs
+        self.output_format = output_format
+        self.translate_to = translate_to
         self.max_references_per_subtopic = max_references_per_subtopic
         self.browser = None
         self.topics = []
@@ -960,17 +964,64 @@ This file tracks the generated topics and subtopics for your academic research p
         for ref in enhanced_refs:
             all_content.append(f"- {ref}\n")
         
-        # Write the final paper
+        # Translate the content if requested
+        if self.translate_to and self.translate_to != self.language:
+            try:
+                logger.info(f"Translating paper to {self.translate_to}...")
+                
+                # Join the content for translation
+                full_text = "\n".join(all_content)
+                
+                # Translate using Gemini API
+                translate_prompt = f"""
+                Translate the following content from {self.language} to {self.translate_to}. 
+                Maintain all formatting, including markdown syntax, headers, bullet points, etc.
+                Keep all references unchanged.
+                
+                Content to translate:
+                {full_text}
+                """
+                
+                model = genai.GenerativeModel('gemini-1.5-pro')
+                response = model.generate_content(translate_prompt, generation_config={"temperature": 0.1})
+                translated_text = response.text
+                
+                # Extract the translated content only (in case there's any extra text in the response)
+                all_content = translated_text.split('\n')
+                logger.info(f"Translation to {self.translate_to} completed")
+                
+            except Exception as e:
+                logger.error(f"Translation failed: {str(e)}")
+                logger.info("Proceeding with original language")
+        
+        # Write the final paper in markdown format first
         try:
             with open(final_paper_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(all_content))
             
             logger.info(f"Final paper generated at: {final_paper_path}")
+            
+            # Convert to the requested format if not markdown
+            if self.output_format != "md":
+                try:
+                    from format_converter import convert_file
+                    converted_path = convert_file(final_paper_path, self.output_format)
+                    
+                    if converted_path:
+                        logger.info(f"Converted final paper to {self.output_format} format: {converted_path}")
+                        return converted_path
+                    else:
+                        logger.error(f"Failed to convert to {self.output_format} format. Using markdown instead.")
+                        return final_paper_path
+                except ImportError:
+                    logger.error("format_converter module not found. Using markdown format instead.")
+                    return final_paper_path
+            
             return final_paper_path
         except Exception as e:
             logger.error(f"Error writing final paper: {str(e)}")
             return ""
-        
+    
     def _determine_content_type(self, topics: List[Dict[str, Any]]) -> str:
         """
         Determine the content type based on the topics.
@@ -2887,9 +2938,38 @@ def parse_arguments():
     )
     
     parser.add_argument(
+        "--output-format",
+        type=str,
+        default="md",
+        choices=["md", "pdf", "html", "epub", "docx", "txt"],
+        help="Format for the final paper output (default: md). Options: md, pdf, html, epub, docx, txt"
+    )
+    
+    parser.add_argument(
+        "--max-references-per-subtopic",
+        type=int,
+        default=10,
+        help="Maximum number of references to collect per subtopic (default: 10)"
+    )
+    
+    parser.add_argument(
+        "--translate-to",
+        type=str,
+        default=None,
+        help="Target language code to translate the final paper to (e.g., 'en', 'tr', 'es'). If not specified, no translation will be performed."
+    )
+    
+    parser.add_argument(
         "--no-pdfs",
         action="store_true",
         help="Set this flag to make PDFs optional (equivalent to --require-pdfs=False)"
+    )
+    
+    parser.add_argument(
+        "--site-tld",
+        type=str,
+        default=None,
+        help="Top-level domain to restrict searches to (e.g., 'edu', 'gov', 'org')"
     )
     
     args = parser.parse_args()
@@ -2923,10 +3003,13 @@ def main():
         logger.info(f"Crawl depth: {args.crawl_depth}")
         logger.info(f"Max crawl pages: {args.max_crawl_pages}")
         logger.info(f"Search purpose: {args.search_purpose}")
+        if args.site_tld:
+            logger.info(f"Site TLD filter: {args.site_tld}")
         
         # Handle the --no-pdfs flag
         require_pdfs = not args.no_pdfs if args.no_pdfs else args.require_pdfs
         logger.info(f"Require PDFs: {require_pdfs}")
+        logger.info(f"Output format: {args.output_format}")
         
         # Initialize LazyScholar
         logger.info("Initializing LazyScholar...")
@@ -2944,12 +3027,17 @@ def main():
             crawl_depth=args.crawl_depth,
             max_crawl_pages=args.max_crawl_pages,
             search_purpose=args.search_purpose,
-            require_pdfs=require_pdfs
+            require_pdfs=require_pdfs,
+            output_format=args.output_format,
+            max_references_per_subtopic=args.max_references_per_subtopic,
+            translate_to=args.translate_to
         )
         
         # Log academic format setting
         logger.info(f"Academic format: {args.academic_format}")
         logger.info(f"Language: {args.language}")
+        if args.translate_to:
+            logger.info(f"Translate to: {args.translate_to}")
         
         # Check if we should just regenerate the final paper
         if hasattr(args, 'regenerate_final_paper') and args.regenerate_final_paper:

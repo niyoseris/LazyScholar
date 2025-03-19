@@ -155,6 +155,40 @@
                                 </select>
                                 <div class="form-text">Choose the purpose of your search to get better results</div>
                             </div>
+                            
+                            <div class="col-md-6 mb-3">
+                                <label for="output_format" class="form-label">Output Format</label>
+                                <select class="form-select" id="output_format" name="output_format">
+                                    <option value="md" {% if profile and profile.output_format == 'md' %}selected{% endif %}>Markdown</option>
+                                    <option value="pdf" {% if profile and profile.output_format == 'pdf' %}selected{% endif %}>PDF</option>
+                                    <option value="html" {% if profile and profile.output_format == 'html' %}selected{% endif %}>HTML</option>
+                                    <option value="epub" {% if profile and profile.output_format == 'epub' %}selected{% endif %}>EPUB</option>
+                                    <option value="docx" {% if profile and profile.output_format == 'docx' %}selected{% endif %}>Word (DOCX)</option>
+                                    <option value="txt" {% if profile and profile.output_format == 'txt' %}selected{% endif %}>Plain Text</option>
+                                </select>
+                                <div class="form-text">Choose the format for the final research output</div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="translate_to" class="form-label">Translate Paper To</label>
+                                <select class="form-select" id="translate_to" name="translate_to">
+                                    <option value="" {% if not profile or not profile.translate_to %}selected{% endif %}>No Translation</option>
+                                    <option value="en" {% if profile and profile.translate_to == 'en' %}selected{% endif %}>English</option>
+                                    <option value="tr" {% if profile and profile.translate_to == 'tr' %}selected{% endif %}>Turkish</option>
+                                    <option value="es" {% if profile and profile.translate_to == 'es' %}selected{% endif %}>Spanish</option>
+                                    <option value="fr" {% if profile and profile.translate_to == 'fr' %}selected{% endif %}>French</option>
+                                    <option value="de" {% if profile and profile.translate_to == 'de' %}selected{% endif %}>German</option>
+                                    <option value="it" {% if profile and profile.translate_to == 'it' %}selected{% endif %}>Italian</option>
+                                    <option value="pt" {% if profile and profile.translate_to == 'pt' %}selected{% endif %}>Portuguese</option>
+                                    <option value="ru" {% if profile and profile.translate_to == 'ru' %}selected{% endif %}>Russian</option>
+                                    <option value="zh" {% if profile and profile.translate_to == 'zh' %}selected{% endif %}>Chinese</option>
+                                    <option value="ja" {% if profile and profile.translate_to == 'ja' %}selected{% endif %}>Japanese</option>
+                                    <option value="ar" {% if profile and profile.translate_to == 'ar' %}selected{% endif %}>Arabic</option>
+                                </select>
+                                <div class="form-text">Optionally translate the final paper to another language</div>
+                            </div>
                         </div>
 
                         <div class="mb-4">
@@ -220,6 +254,8 @@ document.getElementById('template_selector').addEventListener('change', function
                 document.getElementById('max_crawl_pages').value = data.max_crawl_pages || 20;
                 document.getElementById('search_purpose').value = data.search_purpose || 'academic';
                 document.getElementById('require_pdfs').checked = data.require_pdfs !== false;
+                document.getElementById('output_format').value = data.output_format || 'md';
+                document.getElementById('translate_to').value = data.translate_to || '';
             });
     }
 });

@@ -3032,3 +3032,42 @@ These changes should significantly reduce the time required for the research pro
 # Vision Usage Optimization
 
 // ... existing content ...
+
+## Migration Note for Output Format Feature
+
+After deploying this update, you'll need to run database migrations to add the new output_format column to the ResearchProfile table.
+
+Run the following commands to create and apply the migration:
+
+```
+flask db migrate -m "Add output_format column to ResearchProfile"
+flask db upgrade
+```
+
+If you're not using migrations, you can manually add the column to your database:
+
+For SQLite:
+```sql
+ALTER TABLE research_profile ADD COLUMN output_format VARCHAR(10) DEFAULT 'md';
+```
+
+For MySQL/PostgreSQL:
+```sql
+ALTER TABLE research_profile ADD COLUMN output_format VARCHAR(10) DEFAULT 'md';
+```
+
+6. **Error: CSS Linter Warnings in profile_view.html**: The CSS linter reports warnings for Jinja2 template expressions in CSS style attributes.
+   - **Impact**: This is a false positive warning from the linter that doesn't affect the functionality.
+   - **Cause**: The linter doesn't understand Jinja2 templating within CSS style attributes.
+   - **Fix**: This is a minor issue that doesn't need fixing as it doesn't affect functionality. The Jinja2 expressions `{{ progress }}%` within the style attribute work correctly at runtime.
+   - **Alternative Fix**: If the warnings are bothersome, you could use JavaScript to set the width of the progress bar after the page loads instead of using inline styles with Jinja2.
+   
+// ... existing code ...
+
+7. **Error: Missing Database Column**: After adding the translate_to field to the ResearchProfile model, the application crashed with "no such column: research_profile.translate_to".
+   - **Impact**: The application was unusable as it crashed on the dashboard page.
+   - **Cause**: The database schema needed to be updated to match the model changes.
+   - **Fix**: Created and applied a Flask-Migrate migration script to add the missing column to the database.
+   - **Future Prevention**: Always run `flask db migrate -m "message"` and `flask db upgrade` after modifying the database models.
+
+// ... existing code ...

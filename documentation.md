@@ -54,6 +54,14 @@ The project's name is LazyScholar.
     - Changed "Require PDF Files" to "Prioritize Document Files"
     - Updated help text to reflect these changes
 
+12. **Output Format Selection**: Added ability to select the format for the final research output:
+    - Markdown (default)
+    - PDF
+    - HTML
+    - EPUB
+    - Word (DOCX)
+    - Plain Text (TXT)
+
 wrapper:
 
 I want to build a Flask app for this project to make it more easy to setup search params. I want users can change the search parameters trough flask interface and can see created files, topics and suctopics files, downloaded pdf files within the user interface and can read them.
