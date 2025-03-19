@@ -48,6 +48,14 @@
                                                download>
                                                 <i class="fas fa-download me-1"></i>Download
                                             </a>
+                                            <button type="button" 
+                                                   class="btn btn-sm btn-outline-info"
+                                                   data-bs-toggle="modal"
+                                                   data-bs-target="#translateModal"
+                                                   data-file-path="{{ file.path }}"
+                                                   data-file-name="{{ file.name }}">
+                                                <i class="fas fa-language me-1"></i>Translate
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -73,6 +81,60 @@
     </div>
 </div>
 
+<!-- Translation Modal -->
+<div class="modal fade" id="translateModal" tabindex="-1" aria-labelledby="translateModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="translateModalLabel">Translate Paper</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="translateForm" action="{{ url_for('translate_file', profile_id=profile.id) }}" method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="filepath" id="translateFilePath">
+                    <div class="mb-3">
+                        <label for="sourceLanguage" class="form-label">Source Language</label>
+                        <select class="form-select" id="sourceLanguage" name="source_language">
+                            <option value="auto" selected>Auto-detect</option>
+                            <option value="en">English</option>
+                            <option value="tr">Turkish (Türkçe)</option>
+                            <option value="fr">French (Français)</option>
+                            <option value="de">German (Deutsch)</option>
+                            <option value="es">Spanish (Español)</option>
+                            <option value="it">Italian (Italiano)</option>
+                            <option value="ru">Russian (Русский)</option>
+                            <option value="zh">Chinese (中文)</option>
+                            <option value="ja">Japanese (日本語)</option>
+                            <option value="ar">Arabic (العربية)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="targetLanguage" class="form-label">Target Language</label>
+                        <select class="form-select" id="targetLanguage" name="target_language" required>
+                            <option value="" disabled selected>Select language...</option>
+                            <option value="en">English</option>
+                            <option value="tr">Turkish (Türkçe)</option>
+                            <option value="fr">French (Français)</option>
+                            <option value="de">German (Deutsch)</option>
+                            <option value="es">Spanish (Español)</option>
+                            <option value="it">Italian (Italiano)</option>
+                            <option value="ru">Russian (Русский)</option>
+                            <option value="zh">Chinese (中文)</option>
+                            <option value="ja">Japanese (日本語)</option>
+                            <option value="ar">Arabic (العربية)</option>
+                        </select>
+                    </div>
+                    <p class="text-muted"><small>The translation process may take a few moments depending on the file size.</small></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Translate</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 {% block scripts %}
 <script>
 // Add file preview functionality for supported file types
@@ -91,6 +153,16 @@ document.querySelectorAll('[data-bs-toggle="modal"]').forEach(button => {
                     previewContainer.innerHTML = `<pre class="p-3"><code>${content}</code></pre>`;
                 });
         }
+    });
+});
+
+// Set up translation modal
+document.querySelectorAll('[data-bs-target="#translateModal"]').forEach(button => {
+    button.addEventListener('click', function() {
+        const filePath = this.getAttribute('data-file-path');
+        const fileName = this.getAttribute('data-file-name');
+        document.getElementById('translateFilePath').value = filePath;
+        document.getElementById('translateModalLabel').textContent = `Translate: ${fileName}`;
     });
 });
 </script>

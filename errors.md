@@ -68,6 +68,48 @@ This file documents errors and issues encountered during the development of Lazy
    - **Cause**: The language parameter is not being consistently applied across all content extraction processes.
    - **Solution**: Ensure the language parameter is properly passed to all content generation methods and that the LLM is given clear instructions about the desired output language.
 
+## Translation Feature Issues
+
+1. **Error 30: Google API Key Missing**: If the GOOGLE_API_KEY is not set in the environment variables, the translation feature will not work.
+   - **Impact**: Translation will fail and users will see an error message.
+   - **Cause**: The .env file is missing the GOOGLE_API_KEY or it's not properly loaded.
+   - **Fix**: Ensure the GOOGLE_API_KEY is set in the .env file and properly loaded by the application.
+
+2. **Error 31: File Encoding Issues**: Some PDF or text files might have encoding issues when being read for translation.
+   - **Impact**: Translation might fail with a UnicodeDecodeError or produce incorrect translations.
+   - **Cause**: Files with non-UTF-8 encoding aren't properly handled.
+   - **Fix**: Implement more robust file reading with encoding detection or multiple encoding attempts.
+
+3. **Error 32: Google API Rate Limits**: The Google Gemini API has rate limits that could affect translation of large files or multiple translations.
+   - **Impact**: Users might receive rate limit errors when translating many files quickly.
+   - **Cause**: Exceeding Google API rate limits.
+   - **Fix**: The application already implements a retry mechanism with exponential backoff, but additional rate limiting on the application side could provide better user feedback when approaching limits.
+
+4. **Error 33: Large File Handling**: Google Gemini API has token limits that might prevent translation of very large files.
+   - **Impact**: Translation of large files might be incomplete or fail entirely.
+   - **Cause**: File size exceeding token limits of the API.
+   - **Fix**: Implemented a chunking system that splits large documents into smaller segments (approximately 3000 characters each), translates each chunk separately while maintaining paragraph structure, and then recombines them. This ensures complete translation of large files while preserving document structure.
+
+5. **Error 34: Translation Quality for Specialized Content**: Academic papers often contain specialized terminology that might not translate accurately.
+   - **Impact**: Translations might lose important nuance or technical accuracy.
+   - **Cause**: General-purpose translation models may not handle specialized academic vocabulary well.
+   - **Fix**: The application already uses academic-specific prompts in the translate_text function that instruct the model to maintain academic style and terminology.
+
+6. **Error 35: Incorrect File Path Structure**: The translation feature was using an incorrect file path pattern.
+   - **Impact**: Users receive "The specified file doesn't exist" error when trying to translate a file.
+   - **Cause**: The research_dir path in the translate_file function was using a pattern (app.config['UPLOAD_FOLDER'], f"research_{profile_id}") that doesn't match the actual file structure used in the rest of the application.
+   - **Fix**: Updated the path pattern to match the one used in the list_files function (app.config['UPLOAD_FOLDER'], str(current_user.id), str(profile_id)).
+
+7. **Error 36: Language Detection Limitations**: The language detection in academic_formatter might not correctly identify all languages.
+   - **Impact**: Translation might use an incorrect source language, resulting in poor translation quality.
+   - **Cause**: Limitations in the language detection algorithm or model.
+   - **Fix**: Implemented a source language selection dropdown that allows users to manually select the source language or use auto-detection.
+
+8. **Error 37: Language Code Consistency**: The application was not consistently using standardized language codes.
+   - **Impact**: Confusion between different formats of language specification leading to translation errors.
+   - **Cause**: The translation feature was accepting free-form text input for target language and using a mapping system to guess the language code.
+   - **Fix**: Updated the UI to use standardized language code dropdowns matching the academic_formatter's language parameter approach, ensuring consistency throughout the application.
+
 # LazyScholar Research Application Error Log
 
 ## Browser and Search Engine Errors
@@ -3055,19 +3097,3 @@ For MySQL/PostgreSQL:
 ```sql
 ALTER TABLE research_profile ADD COLUMN output_format VARCHAR(10) DEFAULT 'md';
 ```
-
-6. **Error: CSS Linter Warnings in profile_view.html**: The CSS linter reports warnings for Jinja2 template expressions in CSS style attributes.
-   - **Impact**: This is a false positive warning from the linter that doesn't affect the functionality.
-   - **Cause**: The linter doesn't understand Jinja2 templating within CSS style attributes.
-   - **Fix**: This is a minor issue that doesn't need fixing as it doesn't affect functionality. The Jinja2 expressions `{{ progress }}%` within the style attribute work correctly at runtime.
-   - **Alternative Fix**: If the warnings are bothersome, you could use JavaScript to set the width of the progress bar after the page loads instead of using inline styles with Jinja2.
-   
-// ... existing code ...
-
-7. **Error: Missing Database Column**: After adding the translate_to field to the ResearchProfile model, the application crashed with "no such column: research_profile.translate_to".
-   - **Impact**: The application was unusable as it crashed on the dashboard page.
-   - **Cause**: The database schema needed to be updated to match the model changes.
-   - **Fix**: Created and applied a Flask-Migrate migration script to add the missing column to the database.
-   - **Future Prevention**: Always run `flask db migrate -m "message"` and `flask db upgrade` after modifying the database models.
-
-// ... existing code ...

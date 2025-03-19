@@ -18,6 +18,10 @@ PyPDF2==3.0.1
 pdfplumber==0.10.3
 PyMuPDF==1.23.26  # For PDF preview functionality
 
+# Document generation and conversion
+markdown==3.5.2
+weasyprint==60.2  # For PDF generation from HTML when pandoc is not available
+
 # Web scraping
 beautifulsoup4==4.12.3
 bs4>=0.0.1
@@ -41,3 +45,4 @@ Flask-Login==0.6.3
 Flask-WTF==1.2.1
 Werkzeug==3.0.1
 SQLAlchemy==2.0.28
+Flask-Migrate==4.0.5

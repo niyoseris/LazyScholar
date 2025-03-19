@@ -14,6 +14,10 @@ import time
 import queue
 import uuid
 import urllib.parse
+import requests
+import re
+from pathlib import Path
+from academic_formatter import initialize_model, detect_language, translate_text
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -101,7 +105,7 @@ class ResearchProgress:
 def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=True, 
                 language='en', search_suffix=None, headless=True, site_tld=None,
                 minimum_pdfs=3, crawl_depth=3, max_crawl_pages=20, search_purpose='academic',
-                require_pdfs=True, task_id=None, search_engine=None, output_format='md', translate_to=None):
+                require_pdfs=True, task_id=None, search_engine=None, output_format='md'):
     """
     Wrapper function for LazyScholar to handle research process
     
@@ -122,7 +126,6 @@ def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=Tru
         task_id (str): Unique identifier for tracking progress
         search_engine (str): Search engine URL to use for research
         output_format (str): Format for the final paper ('md', 'pdf', 'html', 'epub', etc.)
-        translate_to (str): Target language for translation (if requested)
         
     Returns:
         bool: True if research completed successfully, False otherwise
@@ -216,8 +219,7 @@ def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=Tru
             max_crawl_pages=max_crawl_pages,
             search_purpose=search_purpose,
             require_pdfs=require_pdfs,
-            output_format=output_format,
-            translate_to=translate_to
+            output_format=output_format
         )
         
         # Execute research
@@ -315,7 +317,6 @@ class ResearchProfile(db.Model):
     search_purpose = db.Column(db.String(20), default='academic')  # Purpose of the search: 'academic', 'practical', or 'travel'
     require_pdfs = db.Column(db.Boolean, default=True)  # Whether PDFs are required for the search
     output_format = db.Column(db.String(10), default='md')  # Output format: 'md', 'pdf', 'html', 'epub', etc.
-    translate_to = db.Column(db.String(10))  # Target language for translation (if requested)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
@@ -385,7 +386,6 @@ def new_profile():
             search_purpose=request.form.get('search_purpose', 'academic'),
             require_pdfs='require_pdfs' in request.form,
             output_format=request.form.get('output_format', 'md'),
-            translate_to=request.form.get('translate_to'),
             user_id=current_user.id
         )
         db.session.add(profile)
@@ -539,8 +539,7 @@ def start_research(profile_id):
                 require_pdfs=profile.require_pdfs,
                 task_id=task_id,
                 search_engine=profile.search_url,  # Pass the search URL from the profile
-                output_format=profile.output_format,
-                translate_to=profile.translate_to
+                output_format=profile.output_format
             )
         except Exception as e:
             app.logger.error(f"Research error for profile {profile_id}: {str(e)}")
@@ -618,7 +617,6 @@ def edit_profile(profile_id):
         profile.search_purpose = request.form.get('search_purpose', 'academic')
         profile.require_pdfs = 'require_pdfs' in request.form
         profile.output_format = request.form.get('output_format', 'md')
-        profile.translate_to = request.form.get('translate_to')
         
         db.session.commit()
         flash('Profile updated successfully')
@@ -664,8 +662,7 @@ def get_template(template_id):
         'max_crawl_pages': template.max_crawl_pages,
         'search_purpose': template.search_purpose,
         'require_pdfs': template.require_pdfs,
-        'output_format': template.output_format,
-        'translate_to': template.translate_to
+        'output_format': template.output_format
     })
 
 @app.route('/api/progress/<task_id>')
@@ -695,6 +692,157 @@ def stream_progress(task_id):
             time.sleep(1)
     
     return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/files/<int:profile_id>/translate', methods=['POST'])
+@login_required
+def translate_file(profile_id):
+    profile = ResearchProfile.query.get_or_404(profile_id)
+    
+    # Check if the profile belongs to the current user
+    if profile.user_id != current_user.id:
+        flash("You don't have permission to access this profile", "danger")
+        return redirect(url_for('dashboard'))
+    
+    filepath = request.form.get('filepath')
+    source_language = request.form.get('source_language', 'auto')
+    target_language = request.form.get('target_language')
+    
+    if not filepath or not target_language:
+        flash("Missing required parameters", "danger")
+        return redirect(url_for('list_files', profile_id=profile_id))
+    
+    # Get the full path to the file
+    research_dir = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id), str(profile_id))
+    full_filepath = os.path.join(research_dir, filepath)
+    
+    # Log the path for debugging
+    logger.info(f"Attempting to translate file at: {full_filepath}")
+    
+    # Ensure the file exists
+    if not os.path.exists(full_filepath):
+        flash("The specified file doesn't exist", "danger")
+        return redirect(url_for('list_files', profile_id=profile_id))
+    
+    try:
+        # Initialize the Gemini model
+        model = initialize_model()
+        if not model:
+            flash("Could not initialize the language model. Check API keys and try again.", "danger")
+            return redirect(url_for('list_files', profile_id=profile_id))
+        
+        # Read the file content
+        with open(full_filepath, 'r', encoding='utf-8') as file:
+            content = file.read()
+        
+        # Detect the source language if set to auto (using just the first part for detection)
+        sample_for_detection = content[:5000]  # Use first 5000 chars for detection
+        if source_language == 'auto':
+            detected_language = detect_language(model, sample_for_detection)
+            logger.info(f"Auto-detected source language: {detected_language}")
+            source_language = detected_language
+        else:
+            logger.info(f"Using user-specified source language: {source_language}")
+        
+        # Define a function to split text into chunks
+        def split_text_into_chunks(text, max_chunk_size=3000):
+            """Split text into chunks of approximately max_chunk_size characters, preserving paragraphs."""
+            # First split by double newlines (paragraphs)
+            paragraphs = text.split('\n\n')
+            chunks = []
+            current_chunk = ""
+            
+            for paragraph in paragraphs:
+                # If adding this paragraph would exceed max_chunk_size, 
+                # and the current chunk isn't empty, start a new chunk
+                if len(current_chunk) + len(paragraph) > max_chunk_size and current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = paragraph + '\n\n'
+                else:
+                    current_chunk += paragraph + '\n\n'
+            
+            # Add the last chunk if it's not empty
+            if current_chunk:
+                chunks.append(current_chunk)
+            
+            return chunks
+        
+        # Split the content into manageable chunks
+        logger.info("Splitting content into chunks for translation")
+        chunks = split_text_into_chunks(content)
+        logger.info(f"Content split into {len(chunks)} chunks")
+        
+        # Translate each chunk
+        translated_chunks = []
+        for i, chunk in enumerate(chunks):
+            logger.info(f"Translating chunk {i+1}/{len(chunks)}")
+            try:
+                # Include context about the document's structure if it's not the first chunk
+                context = ""
+                if i > 0:
+                    context = "This is a continuation of an academic document. Maintain consistency with previous translations."
+                
+                # Translate the chunk
+                translated_chunk = translate_text(model, chunk, source_language, target_language)
+                translated_chunks.append(translated_chunk)
+            except Exception as e:
+                logger.error(f"Error translating chunk {i+1}: {str(e)}")
+                # If translation fails, use original text
+                translated_chunks.append(f"[Translation error for this section: {str(e)}]\n\n{chunk}")
+        
+        # Combine the translated chunks
+        translated_content = "\n".join(translated_chunks)
+        
+        # Map language codes to display names for the filename
+        language_display_names = {
+            'en': 'english',
+            'tr': 'turkish',
+            'fr': 'french',
+            'de': 'german',
+            'es': 'spanish',
+            'it': 'italian',
+            'ru': 'russian',
+            'zh': 'chinese',
+            'ja': 'japanese',
+            'ar': 'arabic'
+        }
+        
+        # Generate a filename for the translated file
+        file_path = Path(filepath)
+        base_name = file_path.stem
+        extension = file_path.suffix
+        language_display = language_display_names.get(target_language, target_language)
+        translated_filename = f"{base_name}_{language_display}{extension}"
+        translated_filepath = os.path.join(research_dir, str(file_path.parent), translated_filename)
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(translated_filepath), exist_ok=True)
+        
+        # Write the translated content to a new file
+        with open(translated_filepath, 'w', encoding='utf-8') as file:
+            file.write(translated_content)
+        
+        # Get readable language name for the flash message
+        language_readable_names = {
+            'en': 'English',
+            'tr': 'Turkish',
+            'fr': 'French',
+            'de': 'German',
+            'es': 'Spanish',
+            'it': 'Italian',
+            'ru': 'Russian',
+            'zh': 'Chinese',
+            'ja': 'Japanese',
+            'ar': 'Arabic'
+        }
+        target_language_name = language_readable_names.get(target_language, target_language.upper())
+        
+        flash(f"Successfully translated to {target_language_name}", "success")
+        return redirect(url_for('list_files', profile_id=profile_id))
+    
+    except Exception as e:
+        logger.error(f"Translation error: {str(e)}")
+        flash(f"Error translating file: {str(e)}", "danger")
+        return redirect(url_for('list_files', profile_id=profile_id))
 
 if __name__ == '__main__':
     with app.app_context():
