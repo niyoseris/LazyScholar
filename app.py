@@ -18,6 +18,8 @@ import requests
 import re
 from pathlib import Path
 from academic_formatter import initialize_model, detect_language, translate_text
+import markdown
+import bleach
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -59,12 +61,13 @@ class ResearchProgress:
     
     def __init__(self, task_id):
         self.task_id = task_id
-        self.status = "initializing"  # initializing, running, completed, failed
+        self.status = "initializing"  # initializing, running, completed, failed, cancelled
         self.progress = 0  # 0-100
         self.current_step = "Starting research..."
         self.details = {}
         self.messages = []
         self.last_update = time.time()
+        self.cancelled = False  # Flag to indicate if the task has been cancelled
     
     def update(self, status=None, progress=None, current_step=None, details=None, message=None):
         """Update the progress"""
@@ -88,6 +91,23 @@ class ResearchProgress:
             
             self.last_update = time.time()
     
+    def cancel(self):
+        """Cancel the research task"""
+        with self._lock:
+            self.cancelled = True
+            self.status = "cancelled"
+            self.current_step = "Research cancelled by user"
+            self.messages.append({
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "text": "Research task cancelled by user"
+            })
+            self.last_update = time.time()
+    
+    def is_cancelled(self):
+        """Check if the task has been cancelled"""
+        with self._lock:
+            return self.cancelled
+    
     def to_dict(self):
         """Convert to dictionary for JSON serialization"""
         with self._lock:
@@ -98,7 +118,8 @@ class ResearchProgress:
                 "current_step": self.current_step,
                 "details": self.details,
                 "messages": self.messages,
-                "last_update": self.last_update
+                "last_update": self.last_update,
+                "cancelled": self.cancelled
             }
 
 # LazyScholar wrapper function
@@ -251,9 +272,242 @@ def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=Tru
                 search_url = f"{search_engine}?q={encoded_query}"
             logger.info(f"Using custom search URL: {search_url}")
         
+        # Wrapper class to make a cancellable browser instance
+        class CancellableResearch:
+            def __init__(self, scholar, progress_tracker):
+                self.scholar = scholar
+                self.progress = progress_tracker
+                self.browser = None
+                
+            def conduct_research(self, search_query, search_url):
+                # Store the problem statement
+                self.scholar.problem_statement = search_query
+                
+                # Generate topics and subtopics
+                self.scholar.topics = self.scholar.analyze_problem_statement(search_query)
+                
+                # Update the topics tracking file
+                self.scholar.update_topics_tracking_file()
+                
+                # Start the browser
+                logger.info("Starting browser...")
+                self.scholar.start_browser()
+                self.browser = self.scholar.browser  # Store reference to browser for cancellation
+                logger.info("Browser started successfully")
+                
+                # Check for cancellation before continuing
+                if self.progress.is_cancelled():
+                    logger.info("Research cancelled by user before starting the search")
+                    if self.browser:
+                        self.browser.quit()
+                    return False
+                
+                try:
+                    # Process each topic and subtopic
+                    for topic_index, topic_data in enumerate(self.scholar.topics):
+                        # Check for cancellation before each topic
+                        if self.progress.is_cancelled():
+                            logger.info(f"Research cancelled by user before processing topic {topic_data['title']}")
+                            if self.browser:
+                                self.browser.quit()
+                            return False
+                            
+                        topic_title = topic_data["title"]
+                        subtopics = topic_data["subtopics"]
+                        
+                        logger.info(f"Processing topic {topic_index + 1}/{len(self.scholar.topics)}: {topic_title}")
+                        
+                        # Create topic directory
+                        topic_dir = os.path.join(self.scholar.output_dir, "topics", self.scholar._sanitize_filename(topic_title))
+                        os.makedirs(topic_dir, exist_ok=True)
+                        
+                        # Process each subtopic
+                        for subtopic_index, subtopic_data in enumerate(subtopics):
+                            # Check for cancellation before each subtopic
+                            if self.progress.is_cancelled():
+                                logger.info(f"Research cancelled by user before processing subtopic {subtopic_data['title']}")
+                                if self.browser:
+                                    self.browser.quit()
+                                return False
+                                
+                            subtopic_title = subtopic_data["title"]
+                            
+                            logger.info(f"Processing subtopic {subtopic_index + 1}/{len(subtopics)}: {subtopic_title}")
+                            
+                            # Set current topic and subtopic
+                            self.scholar.current_topic = topic_title
+                            self.scholar.current_subtopic = subtopic_title
+                            
+                            # Use search_phrase for search if available, otherwise use the subtopic title
+                            search_title = subtopic_data.get("search_phrase", subtopic_title)
+                            
+                            # Ensure search_phrase is in English for search engines
+                            if not search_title or not all(ord(c) < 128 for c in search_title):
+                                logger.warning(f"Invalid search phrase: {search_title}. Generating a new one.")
+                                search_title = f"{topic_title} {subtopic_title}".replace("'", "").replace('"', '')
+                                # Handle non-ASCII characters
+                                if not all(ord(c) < 128 for c in search_title):
+                                    import unicodedata
+                                    search_title = ''.join(
+                                        c for c in unicodedata.normalize('NFKD', search_title)
+                                        if unicodedata.category(c) != 'Mn'
+                                    )
+                                    # Replace any remaining non-ASCII characters with spaces
+                                    search_title = ''.join(c if ord(c) < 128 else ' ' for c in search_title)
+                                    search_title = ' '.join(search_title.split())  # Normalize spaces
+                                    logger.info(f"Using search phrase for {topic_title} - {subtopic_title}: {search_title}")
+                            
+                            # Search for sources related to the subtopic
+                            subtopic_search_query = f"{search_title} {self.scholar.search_suffix}".strip()
+                            
+                            # Add site restriction if site_tld is specified and not already in the query
+                            if self.scholar.site_tld and f"site:{self.scholar.site_tld}" not in subtopic_search_query.lower():
+                                subtopic_search_query += f" site:{self.scholar.site_tld}"
+                            
+                            # Log the search query being used
+                            logger.info(f"Using search phrase for {topic_title} - {subtopic_title}: {subtopic_search_query}")
+                            
+                            # Let LazyScholar handle the actual PDF search and content extraction
+                            # We'll use its methods directly rather than trying to replicate all the complex logic
+                            
+                            # Initialize content list
+                            pdf_contents = []
+                            
+                            # Check for cancellation before searching
+                            if self.progress.is_cancelled():
+                                logger.info(f"Research cancelled by user before searching for {subtopic_title}")
+                                if self.browser:
+                                    self.browser.quit()
+                                return False
+                            
+                            # Follow the same logic as in conduct_research
+                            if not self.scholar.require_pdfs:
+                                logger.info("Prioritizing HTML content as 'Prioritize Document Files' is unchecked")
+                                self.scholar._extract_html_content(subtopic_search_query, pdf_contents, topic_title, subtopic_title, search_url)
+                            else:
+                                # Search for PDFs
+                                pdf_urls = self.scholar._search_for_pdfs(subtopic_search_query, search_url) or []
+                                
+                                # Process PDFs in the directory
+                                pdf_dir = os.path.join(self.scholar.output_dir, "pdfs")
+                                if os.path.exists(pdf_dir):
+                                    pdf_files = [os.path.join(pdf_dir, f) for f in os.listdir(pdf_dir) if f.endswith('.pdf')]
+                                    pdf_files.sort(key=lambda x: os.path.getctime(x), reverse=True)
+                                    recent_pdfs = pdf_files[:self.scholar.max_pdfs_per_topic]
+                                    
+                                    if recent_pdfs:
+                                        logger.info(f"Processing {len(recent_pdfs)} recently downloaded PDFs")
+                                        pdf_contents = self.scholar._process_pdfs_for_subtopic(recent_pdfs, topic_title, subtopic_title) or []
+                                
+                                # Try HTML if needed
+                                if len(pdf_contents) < self.scholar.minimum_pdfs:
+                                    if self.scholar.focus != 'pdf':
+                                        logger.info(f"Not enough PDF content found, adding HTML content...")
+                                        self.scholar._extract_html_content(subtopic_search_query, pdf_contents, topic_title, subtopic_title, search_url)
+                            
+                            # Check for cancellation after search
+                            if self.progress.is_cancelled():
+                                logger.info(f"Research cancelled by user after searching for {subtopic_title}")
+                                if self.browser:
+                                    self.browser.quit()
+                                return False
+                            
+                            # Write the subtopic file
+                            subtopic_file = os.path.join(topic_dir, f"{self.scholar._sanitize_filename(subtopic_title)}.md")
+                            
+                            # Only write the file if we have content
+                            if pdf_contents:
+                                try:
+                                    with open(subtopic_file, "w", encoding="utf-8") as f:
+                                        f.write(f"# {subtopic_title}\n\n")
+                                        for content in pdf_contents:
+                                            f.write(content["content"] + "\n\n")
+                                        f.write("## References\n\n")
+                                        for content in pdf_contents:
+                                            source = content.get("source", "Unknown source")
+                                            f.write(f"- {source}\n")
+                                    logger.info(f"Wrote subtopic file: {subtopic_file}")
+                                    
+                                    # Optimize the subtopic content using LLM
+                                    try:
+                                        logger.info(f"Optimizing content for {topic_title} - {subtopic_title}")
+                                        self.scholar._optimize_subtopic_content_with_llm(subtopic_file, topic_title, subtopic_title)
+                                        logger.info(f"Content optimization completed for {subtopic_title}")
+                                    except Exception as opt_error:
+                                        logger.error(f"Error optimizing subtopic content with LLM: {str(opt_error)}")
+                                    
+                                except Exception as e:
+                                    logger.error(f"Error writing subtopic file: {str(e)}")
+                            
+                            # Update subtopic with extracted content
+                            subtopic_data["pdf_contents"] = pdf_contents
+                            
+                    # Final cancellation check before generating the paper
+                    if self.progress.is_cancelled():
+                        logger.info("Research cancelled by user before generating final paper")
+                        if self.browser:
+                            self.browser.quit()
+                        return False
+                    
+                    # Generate the final paper
+                    logger.info("Generating final paper...")
+                    final_paper_path = self.scholar.generate_final_paper(self.scholar.topics)
+                    logger.info("Research completed successfully")
+                    
+                    # Check if we should apply academic format
+                    if self.scholar.academic_format:
+                        logger.info("Formatting final paper as academic paper...")
+                        try:
+                            # Import the academic_formatter module
+                            import academic_formatter
+                            
+                            # Initialize the model
+                            model = academic_formatter.initialize_model()
+                            if not model:
+                                logger.error("Failed to initialize model for academic formatting")
+                                return True
+                            
+                            # Extract references and content
+                            pdf_references, content = academic_formatter.extract_references_from_final_paper(final_paper_path)
+                            
+                            # Format as academic paper
+                            formatted_paper = academic_formatter.format_as_academic_paper(model, content, pdf_references, self.scholar.language)
+                            
+                            # Save formatted paper
+                            output_path = academic_formatter.save_formatted_paper(final_paper_path, formatted_paper)
+                            
+                            if output_path:
+                                logger.info(f"Successfully formatted final paper as academic paper at {output_path}")
+                            else:
+                                logger.error("Failed to save formatted academic paper")
+                        except Exception as e:
+                            logger.error(f"Error formatting final paper: {str(e)}")
+                    
+                    return True
+                    
+                except Exception as e:
+                    logger.error(f"Error during research: {str(e)}")
+                    if self.browser:
+                        self.browser.quit()
+                    return False
+                    
+            def cancel(self):
+                """Cancel the research by quitting the browser if it's running"""
+                logger.info("Attempting to cancel research and close browser")
+                if self.browser:
+                    try:
+                        self.browser.quit()
+                        logger.info("Browser closed successfully during cancellation")
+                    except Exception as e:
+                        logger.error(f"Error closing browser during cancellation: {str(e)}")
+                return True
+        
+        # Create a cancellable research instance
+        cancellable_research = CancellableResearch(scholar, progress)
+        
         # Add a try-except block around the conduct_research call
         try:
-            result = scholar.conduct_research(search_query, search_url)
+            result = cancellable_research.conduct_research(search_query, search_url)
         except Exception as e:
             logger.error(f"Error during research: {str(e)}")
             progress.update(status="failed", current_step="Research failed", 
@@ -269,9 +523,13 @@ def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=Tru
                            current_step="Research completed", 
                            message="Research process completed successfully")
         else:
-            logger.error("Research process failed")
-            progress.update(status="failed", current_step="Research failed", 
-                           message="Research process did not complete successfully")
+            if progress.is_cancelled():
+                logger.info("Research cancelled by user")
+                # Note: Progress status is already set to "cancelled" in the cancel() method
+            else:
+                logger.error("Research process failed")
+                progress.update(status="failed", current_step="Research failed", 
+                              message="Research process did not complete successfully")
             
         return result
         
@@ -291,6 +549,25 @@ migrate = Migrate(app, db)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+
+# Add markdown filter to Jinja2
+@app.template_filter('markdown')
+def render_markdown(text):
+    # Convert markdown to HTML
+    html = markdown.markdown(text, extensions=['extra', 'codehilite', 'tables', 'toc'])
+    
+    # Sanitize HTML to prevent XSS
+    allowed_tags = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'a', 'ul', 'ol', 'li', 
+                    'strong', 'em', 'code', 'pre', 'blockquote', 'table', 'thead', 
+                    'tbody', 'tr', 'th', 'td', 'br', 'hr', 'img', 'span', 'div']
+    allowed_attrs = {
+        '*': ['id', 'class'],
+        'a': ['href', 'title', 'target'],
+        'img': ['src', 'alt', 'title', 'width', 'height']
+    }
+    
+    clean_html = bleach.clean(html, tags=allowed_tags, attributes=allowed_attrs)
+    return clean_html
 
 # Models
 class User(UserMixin, db.Model):
@@ -318,6 +595,7 @@ class ResearchProfile(db.Model):
     require_pdfs = db.Column(db.Boolean, default=True)  # Whether PDFs are required for the search
     output_format = db.Column(db.String(10), default='md')  # Output format: 'md', 'pdf', 'html', 'epub', etc.
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    active_task_id = db.Column(db.String(100), nullable=True)  # Store the active research task ID
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
 @login_manager.user_loader
@@ -399,12 +677,13 @@ def new_profile():
 @app.route('/profile/<int:profile_id>')
 @login_required
 def view_profile(profile_id):
+    """View a research profile details and outputs"""
     profile = ResearchProfile.query.get_or_404(profile_id)
     if profile.user_id != current_user.id:
         return redirect(url_for('dashboard'))
     
-    # Get task_id from query parameter if available
-    task_id = request.args.get('task_id')
+    # Get task_id from query parameter if available, otherwise use the active_task_id from profile
+    task_id = request.args.get('task_id') or profile.active_task_id
     
     # Get research output directory
     output_dir = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id), str(profile_id))
@@ -450,55 +729,26 @@ def view_profile(profile_id):
                 doc = fitz.open(final_paper_path)
                 page = doc[0]
                 text = page.get_text()
-                final_paper_preview = text[:500] + '...' if len(text) > 500 else text
-                doc.close()
-            except:
-                final_paper_preview = "Preview not available. Please download the PDF to view."
-        
-        # Calculate progress
-        total_steps = 4  # Topics, PDFs, Analysis, Final Paper
-        completed_steps = 0
-        if topics:
-            completed_steps += 1
-        if pdfs:
-            completed_steps += 1
-        if os.path.exists(os.path.join(output_dir, 'analysis')):
-            completed_steps += 1
-        if final_paper:
-            completed_steps += 1
-        progress = (completed_steps / total_steps) * 100
-        
-        # Create progress steps
-        progress_steps = [
-            {
-                'name': 'Topic Generation',
-                'status': 'completed' if topics else 'pending',
-                'details': f"{len(topics)} topics generated" if topics else None
-            },
-            {
-                'name': 'PDF Collection',
-                'status': 'completed' if pdfs else 'pending',
-                'details': f"{len(pdfs)} PDFs collected" if pdfs else None
-            },
-            {
-                'name': 'Content Analysis',
-                'status': 'completed' if os.path.exists(os.path.join(output_dir, 'analysis')) else 'pending'
-            },
-            {
-                'name': 'Final Paper',
-                'status': 'completed' if final_paper else 'pending'
-            }
-        ]
+                final_paper_preview = text[:500] + "..." if len(text) > 500 else text
+            except Exception as e:
+                logger.error(f"Error generating PDF preview: {str(e)}")
+                final_paper_preview = "Preview not available, please download the file to view."
     
-    return render_template('profile_view.html',
-                         profile=profile,
-                         topics=topics,
-                         pdfs=pdfs,
-                         progress=progress,
-                         progress_steps=progress_steps,
-                         final_paper=final_paper,
-                         final_paper_preview=final_paper_preview,
-                         task_id=task_id)
+    # Check if a research process is currently running for this profile
+    research_in_progress = False
+    if task_id:
+        progress_instance = ResearchProgress.get_instance(task_id)
+        if progress_instance.status in ['initializing', 'running']:
+            research_in_progress = True
+    
+    return render_template('profile_view.html', 
+                           profile=profile, 
+                           topics=topics, 
+                           pdfs=pdfs, 
+                           final_paper=final_paper, 
+                           final_paper_preview=final_paper_preview,
+                           task_id=task_id,
+                           research_in_progress=research_in_progress)
 
 @app.route('/research/start/<int:profile_id>')
 @login_required
@@ -513,6 +763,10 @@ def start_research(profile_id):
     # Generate a unique task ID
     task_id = f"research_{profile_id}_{int(time.time())}"
     
+    # Store the task ID in the profile
+    profile.active_task_id = task_id
+    db.session.commit()
+    
     # Initialize progress tracker
     progress = ResearchProgress.get_instance(task_id)
     progress.update(status="initializing", progress=0, 
@@ -520,35 +774,51 @@ def start_research(profile_id):
                    message=f"Initializing research for: {profile.name}")
     
     # Start research in a background thread
-    def run_research_task():
+    def run_research_task(profile_instance, profile_id, task_id):
         try:
             # Use the wrapper function to run research
             result = run_research(
-                problem_statement=profile.problem_statement,
+                problem_statement=profile_instance.problem_statement,
                 output_dir=output_dir,
-                max_pdfs=profile.max_pdfs_per_topic,
-                academic_format=profile.academic_format,
-                language=profile.language,
-                search_suffix=profile.search_suffix,
+                max_pdfs=profile_instance.max_pdfs_per_topic,
+                academic_format=profile_instance.academic_format,
+                language=profile_instance.language,
+                search_suffix=profile_instance.search_suffix,
                 headless=True,
-                site_tld=profile.site_tld,
-                minimum_pdfs=profile.minimum_pdfs,
-                crawl_depth=profile.crawl_depth,
-                max_crawl_pages=profile.max_crawl_pages,
-                search_purpose=profile.search_purpose,
-                require_pdfs=profile.require_pdfs,
+                site_tld=profile_instance.site_tld,
+                minimum_pdfs=profile_instance.minimum_pdfs,
+                crawl_depth=profile_instance.crawl_depth,
+                max_crawl_pages=profile_instance.max_crawl_pages,
+                search_purpose=profile_instance.search_purpose,
+                require_pdfs=profile_instance.require_pdfs,
                 task_id=task_id,
-                search_engine=profile.search_url,  # Pass the search URL from the profile
-                output_format=profile.output_format
+                search_engine=profile_instance.search_url,  # Pass the search URL from the profile
+                output_format=profile_instance.output_format
             )
+            
+            # Clear the active task ID if the research is complete
+            if result:
+                with app.app_context():
+                    updated_profile = ResearchProfile.query.get(profile_id)
+                    if updated_profile and updated_profile.active_task_id == task_id:
+                        updated_profile.active_task_id = None
+                        db.session.commit()
+                        
         except Exception as e:
             app.logger.error(f"Research error for profile {profile_id}: {str(e)}")
             progress = ResearchProgress.get_instance(task_id)
             progress.update(status="failed", current_step="Error occurred", 
                            message=f"Unhandled error: {str(e)}")
+            
+            # Clear the active task ID on error
+            with app.app_context():
+                updated_profile = ResearchProfile.query.get(profile_id)
+                if updated_profile and updated_profile.active_task_id == task_id:
+                    updated_profile.active_task_id = None
+                    db.session.commit()
     
-    # Start the thread
-    thread = threading.Thread(target=run_research_task)
+    # Start the thread with the profile instance
+    thread = threading.Thread(target=run_research_task, args=(profile, profile_id, task_id))
     thread.daemon = True
     thread.start()
     
@@ -585,6 +855,30 @@ def view_file(profile_id, filepath):
         return redirect(url_for('dashboard'))
     
     file_path = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id), str(profile_id), filepath)
+    
+    # Check if the file is a markdown file
+    if filepath.endswith('.md'):
+        # Read the markdown content
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Clean up academic format markdown if needed
+        # Academic formatter sometimes adds ```markdown at the beginning and ``` at the end
+        if content.strip().startswith('```markdown'):
+            # Remove the ```markdown tag at the beginning
+            content = content.replace('```markdown', '', 1).strip()
+            # Remove the closing ``` tag at the end if present
+            if content.strip().endswith('```'):
+                content = content[:content.rstrip().rfind('```')].strip()
+        
+        # Render the markdown content in a template
+        return render_template('markdown_view.html', 
+                               content=content, 
+                               filename=os.path.basename(filepath),
+                               profile_id=profile_id,
+                               filepath=filepath)
+    
+    # For other file types, serve the file directly
     return send_from_directory(os.path.dirname(file_path), os.path.basename(file_path))
 
 @app.route('/logout')
@@ -685,8 +979,8 @@ def stream_progress(task_id):
                 last_update = progress_data['last_update']
                 yield f"data: {json.dumps(progress_data)}\n\n"
             
-            # If the task is completed or failed, end the stream after sending the final update
-            if progress_data['status'] in ['completed', 'failed']:
+            # If the task is completed, failed, or cancelled, end the stream after sending the final update
+            if progress_data['status'] in ['completed', 'failed', 'cancelled']:
                 break
                 
             time.sleep(1)
@@ -843,6 +1137,68 @@ def translate_file(profile_id):
         logger.error(f"Translation error: {str(e)}")
         flash(f"Error translating file: {str(e)}", "danger")
         return redirect(url_for('list_files', profile_id=profile_id))
+
+@app.route('/research/cancel/<task_id>', methods=['POST'])
+@login_required
+def cancel_research(task_id):
+    """Cancel a running research task"""
+    # Get the progress instance
+    progress = ResearchProgress.get_instance(task_id)
+    
+    # Validate ownership (extract profile_id from task_id)
+    try:
+        # Typical task_id format: research_profile_id_timestamp
+        parts = task_id.split('_')
+        if len(parts) >= 2 and parts[0] == 'research':
+            profile_id = int(parts[1])
+            profile = ResearchProfile.query.get_or_404(profile_id)
+            
+            # Check if the profile belongs to the current user
+            if profile.user_id != current_user.id:
+                flash("You don't have permission to cancel this research task", "danger")
+                return redirect(url_for('dashboard'))
+                
+            # Clear the active task ID from the profile
+            if profile.active_task_id == task_id:
+                profile.active_task_id = None
+                db.session.commit()
+        else:
+            flash("Invalid task ID format", "danger")
+            return redirect(url_for('dashboard'))
+    except Exception as e:
+        logger.error(f"Error validating ownership of task {task_id}: {str(e)}")
+        flash("Could not validate task ownership", "danger")
+        return redirect(url_for('dashboard'))
+    
+    # Cancel the task
+    progress.cancel()
+    
+    flash("Research task cancelled. The task will stop soon.", "info")
+    
+    # Redirect back to profile view
+    return redirect(url_for('view_profile', profile_id=profile_id, task_id=task_id))
+
+@app.route('/research/check-status/<int:profile_id>')
+@login_required
+def check_research_status(profile_id):
+    """Check if the active_task_id is still valid and clear it if not"""
+    profile = ResearchProfile.query.get_or_404(profile_id)
+    
+    # Check if the profile belongs to the current user
+    if profile.user_id != current_user.id:
+        return redirect(url_for('dashboard'))
+    
+    # Check if there's an active task
+    if profile.active_task_id:
+        progress = ResearchProgress.get_instance(profile.active_task_id)
+        
+        # If the task is completed, failed, or cancelled, clear the active_task_id
+        if progress.status in ['completed', 'failed', 'cancelled']:
+            profile.active_task_id = None
+            db.session.commit()
+            flash("Research task status has been updated.", "info")
+    
+    return redirect(url_for('view_profile', profile_id=profile_id))
 
 if __name__ == '__main__':
     with app.app_context():

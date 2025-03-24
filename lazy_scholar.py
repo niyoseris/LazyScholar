@@ -148,6 +148,7 @@ class LazyScholar:
         self.topics = []
         self.problem_statement = ""
         self.driver = None
+        self.llm_model = "gemini-2.0-flash-exp"  # Set default LLM model
         
         # Create output directories
         ensure_directory(output_dir)
@@ -214,6 +215,9 @@ class LazyScholar:
                 model_name="gemini-2.0-flash-exp",
                 generation_config=generation_config
             )
+            
+            # Initialize the client reference for use in _optimize_subtopic_content_with_llm
+            self.client = self.model
             
             logger.info("Gemini models initialized successfully")
             logger.info("LazyScholar initialized")
@@ -829,6 +833,116 @@ This file tracks the generated topics and subtopics for your academic research p
             logger.error(f"Error extracting content from HTML: {str(e)}")
             return None
     
+    def _generate_conclusion_with_llm(self, topics: List[Dict[str, Any]]) -> str:
+        """
+        Generate a conclusion section by sending all topic content to the LLM.
+        
+        Args:
+            topics: List of topics and subtopics
+            
+        Returns:
+            A conclusion section in markdown format
+        """
+        logger.info("Generating conclusion section with LLM...")
+        
+        # Collect all the topic and subtopic content
+        topic_contents = []
+        
+        # Process each topic
+        for topic in topics:
+            topic_title = topic.get("title", "")
+            subtopics = topic.get("subtopics", [])
+            
+            # Add the topic to the content
+            topic_contents.append(f"Topic: {topic_title}")
+            
+            # Process each subtopic
+            for subtopic in subtopics:
+                subtopic_title = subtopic.get("title", "")
+                
+                # Find the subtopic file path
+                subtopic_file = subtopic.get("file", "")
+                if not subtopic_file or not os.path.exists(subtopic_file):
+                    # Try to find the file in the topics directory
+                    topic_dir = os.path.join(self.output_dir, "topics", self._sanitize_filename(topic_title))
+                    potential_file = os.path.join(topic_dir, f"{self._sanitize_filename(subtopic_title)}.md")
+                    if os.path.exists(potential_file):
+                        subtopic_file = potential_file
+                
+                # Read the subtopic file
+                if subtopic_file and os.path.exists(subtopic_file):
+                    try:
+                        with open(subtopic_file, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        
+                        # Extract the content without references section
+                        main_content = content.split("## References")[0].strip() if "## References" in content else content.strip()
+                        
+                        # Add summary to the list
+                        topic_contents.append(f"Subtopic: {subtopic_title}\nSummary: {main_content[:300]}...")
+                    except Exception as e:
+                        logger.error(f"Error reading subtopic file {subtopic_file} for conclusion: {str(e)}")
+        
+        # If no content was found, return a default conclusion
+        if not topic_contents:
+            logger.warning("No topic content found for generating conclusion")
+            return "# Conclusion\n\nNo content was available to generate a conclusion."
+        
+        # Prepare prompt for LLM
+        prompt = f"""
+        Please generate a comprehensive conclusion section in {self.language} language for a research paper with the following topics and subtopics:
+        
+        {os.linesep.join(topic_contents)}
+        
+        The conclusion should:
+        1. Summarize the key findings and insights from all topics
+        2. Connect the main themes across different sections
+        3. Provide final thoughts and significance of the research
+        4. Be approximately 500-700 words in length
+        5. Be written in {self.language} language
+        6. Use a formal academic tone
+        7. Be formatted in markdown with the title "# Conclusion"
+        
+        Return only the conclusion text in markdown format, starting with "# Conclusion".
+        """
+        
+        try:
+            # Call the LLM to generate the conclusion
+            def generate_conclusion_wrapper():
+                try:
+                    response = self.model.generate_content(prompt)
+                    # Check if response has the expected attributes
+                    if hasattr(response, 'text'):
+                        return response
+                    else:
+                        logger.warning(f"Unexpected response format from Gemini for conclusion: {response}")
+                        raise ValueError(f"Unexpected response format: {response}")
+                except Exception as e:
+                    logger.error(f"Error in conclusion generation: {str(e)}")
+                    raise
+            
+            # Use the retry mechanism with our wrapper function
+            response = self._api_call_with_retry(generate_conclusion_wrapper)
+            
+            if response and hasattr(response, 'text'):
+                # Extract content from response
+                conclusion_text = response.text.strip()
+                
+                # Ensure the conclusion starts with the proper heading
+                if not conclusion_text.startswith("# Conclusion"):
+                    conclusion_text = "# Conclusion\n\n" + conclusion_text
+                
+                logger.info("Successfully generated conclusion with LLM")
+                return conclusion_text
+            else:
+                logger.warning("Failed to generate conclusion with LLM, using default")
+                return "# Conclusion\n\nThe research presented in this paper covers multiple aspects of the topic. Further research could explore additional dimensions and implications."
+            
+        except Exception as e:
+            logger.error(f"Error generating conclusion with LLM: {str(e)}")
+            # Return a default conclusion in case of error
+            return "# Conclusion\n\nThe research presented in this paper provides valuable insights into the topic. The findings suggest several important implications for theory and practice."
+
     def generate_final_paper(self, topics: List[Dict[str, Any]]) -> str:
         """
         Generate the final paper from the topics and subtopics.
@@ -930,6 +1044,10 @@ This file tracks the generated topics and subtopics for your academic research p
             
             # Add a separator between topics
             all_content.append("\n---\n\n")
+        
+        # Generate conclusion with LLM and add it
+        conclusion = self._generate_conclusion_with_llm(topics)
+        all_content.append(conclusion + "\n\n")
         
         # Enhance the references
         try:
@@ -1230,7 +1348,7 @@ This file tracks the generated topics and subtopics for your academic research p
                                     source = content.get("source", "Unknown source")
                                     f.write(f"- {source}\n")
                             
-                            logger.info(f"Wrote subtopic file: {subtopic_file}")
+                            logger.info(f"QWrote subtopic file: {subtopic_file}")
                         except Exception as e:
                             logger.error(f"Error writing subtopic file: {str(e)}")
                     else:
@@ -1950,7 +2068,7 @@ This file tracks the generated topics and subtopics for your academic research p
                         source = content.get("source", "Unknown source")
                         f.write(f"- {source}\n")
                 
-                logger.info(f"Wrote subtopic file: {subtopic_file}")
+                logger.info(f"WWrote subtopic file: {subtopic_file}")
             except Exception as e:
                 logger.error(f"Error writing subtopic file: {str(e)}")
         else:
@@ -2161,7 +2279,11 @@ This file tracks the generated topics and subtopics for your academic research p
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(markdown)
             
-            logger.info(f"Wrote subtopic file: {file_path}")
+            logger.info(f"OWrote subtopic file: {file_path}")
+            print(f"LWrote subtopic file: {file_path}")
+
+            # Add this line to call the optimization function after writing the file
+            self._optimize_subtopic_content_with_llm(file_path, topic, subtopic)
             
         except Exception as e:
             logger.error(f"Error writing subtopic file: {str(e)}")
@@ -2835,6 +2957,86 @@ This file tracks the generated topics and subtopics for your academic research p
         except Exception as e:
             logger.warning(f"Error checking if URL matches site_tld: {str(e)}")
             return False
+
+    def _optimize_subtopic_content_with_llm(self, file_path: str, topic: str, subtopic: str) -> None:
+        """
+        Send subtopic content to LLM for optimization, removing redundancies and creating a coherent text.
+        Then write the optimized content back to the subtopic file.
+        
+        Args:
+            file_path: Path to the subtopic file
+            topic: The main topic
+            subtopic: The subtopic name
+        """
+        if not os.path.exists(file_path):
+            logger.warning(f"Cannot optimize non-existent file: {file_path}")
+            return
+            
+        # Read existing content
+        with open(file_path, 'r', encoding='utf-8') as f:
+            original_content = f.read()
+        
+        # Skip if content is too short to need optimization
+        if len(original_content.strip()) < 500:  # Arbitrary threshold
+            logger.info(f"Content too short to optimize: {file_path}")
+            return
+        
+        logger.info(f"Optimizing content for {topic} - {subtopic} in language: {self.language}")
+        
+        # Prepare prompt for LLM
+        prompt = f"""
+        I have a research document about "{topic}" focusing on the subtopic "{subtopic}". 
+        Please optimize the following content by:
+        1. Make sure you are using all the information provided in the content
+        2. The result MUST be in {self.language} language. Translate all content into {self.language} language except commonly used international words.
+        3. you can merge the repetative information and make it more concise and coherent.
+        4. Do not use your own words to explain the content, just use the information provided in the content.
+        Here is the content:
+        
+        {original_content}
+        
+        Please return only the optimized content in {self.language} language without additional explanations or in text citations. Provide the citations and references as a list at the end of the content.
+        """
+        
+        try:
+            # Call Gemini model with safer error handling
+            def generate_content_wrapper():
+                try:
+                    response = self.model.generate_content(prompt)
+                    # Check if response has the expected attributes
+                    if hasattr(response, 'text'):
+                        return response
+                    else:
+                        logger.warning(f"Unexpected response format from Gemini: {response}")
+                        raise ValueError(f"Unexpected response format: {response}")
+                except Exception as e:
+                    logger.error(f"Error in content generation: {str(e)}")
+                    raise
+            
+            # Use the retry mechanism with our wrapper function
+            response = self._api_call_with_retry(generate_content_wrapper)
+            
+            if response and hasattr(response, 'text'):
+                # Extract content from response
+                result = response.text
+                
+                # Skip if the result is empty or too short
+                if not result or len(result.strip()) < 200:
+                    logger.warning(f"Optimization produced too short content, keeping original: {len(result) if result else 0} chars")
+                    return
+                
+                # Write optimized content back to file
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(result)
+                    
+                logger.info(f"Successfully optimized content for {topic} - {subtopic} in {self.language} language")
+            else:
+                logger.warning(f"Invalid response from LLM, keeping original content")
+            
+        except Exception as e:
+            logger.error(f"Error optimizing content with LLM: {str(e)}")
+            # Keep original content in case of error
+            logger.info("Keeping original content due to optimization error")
 
 def parse_arguments():
     """Parse command line arguments."""

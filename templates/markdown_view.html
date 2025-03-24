@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-3">
+        <div class="col">
+            <h2>{{ filename }}</h2>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-primary" id="copyButton" onclick="copyToClipboard()">
+                <i class="fas fa-copy"></i> Copy to Clipboard
+            </button>
+            <a href="{{ url_for('view_file', profile_id=profile_id, filepath=filepath) }}" class="btn btn-secondary" download>
+                <i class="fas fa-download"></i> Download
+            </a>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <div id="markdown-content" class="markdown-body">
+                {{ content | markdown | safe }}
+            </div>
+            <!-- Hidden textarea for HTML copy operation -->
+            <textarea id="formatted-content" style="display: none;"></textarea>
+        </div>
+    </div>
+</div>
+
+<!-- Include Github Markdown CSS for proper styling -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.1.0/github-markdown.min.css">
+
+<script>
+    // Copy the formatted HTML content as seen in the view
+    function copyToClipboard() {
+        const contentDiv = document.getElementById('markdown-content');
+        const textarea = document.getElementById('formatted-content');
+        
+        // Create a range and select the formatted content
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(contentDiv);
+        
+        // Store the current selection
+        const oldRanges = [];
+        for (let i = 0; i < selection.rangeCount; i++) {
+            oldRanges.push(selection.getRangeAt(i));
+        }
+        
+        // Clear current selection and add our range
+        selection.removeAllRanges();
+        selection.addRange(range);
+        
+        // Copy formatted content
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                // Modern clipboard API (copies as formatted text)
+                navigator.clipboard.write([
+                    new ClipboardItem({
+                        'text/html': new Blob([contentDiv.innerHTML], { type: 'text/html' }),
+                        'text/plain': new Blob([contentDiv.innerText], { type: 'text/plain' })
+                    })
+                ]).then(() => {
+                    showCopiedMessage();
+                }).catch(err => {
+                    console.error('Failed to copy formatted content: ', err);
+                    fallbackCopy();
+                });
+            } else {
+                fallbackCopy();
+            }
+        } catch (err) {
+            console.error('Error during clipboard operation: ', err);
+            fallbackCopy();
+        } finally {
+            // Restore the original selection
+            selection.removeAllRanges();
+            oldRanges.forEach(range => selection.addRange(range));
+        }
+    }
+    
+    // Fallback copy method for browsers that don't support the modern Clipboard API
+    function fallbackCopy() {
+        try {
+            document.execCommand('copy');
+            showCopiedMessage();
+        } catch (err) {
+            console.error('Fallback copy failed: ', err);
+            alert('Failed to copy content. Please try selecting and copying manually.');
+        }
+    }
+    
+    function showCopiedMessage() {
+        const button = document.getElementById('copyButton');
+        const originalHTML = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-check"></i> Copied!';
+        
+        setTimeout(() => {
+            button.innerHTML = originalHTML;
+        }, 2000);
+    }
+</script>
+
+<style>
+    .markdown-body {
+        box-sizing: border-box;
+        min-width: 200px;
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 45px;
+    }
+    
+    @media (max-width: 767px) {
+        .markdown-body {
+            padding: 15px;
+        }
+    }
+    
+    /* Style the copy button */
+    #copyButton {
+        transition: all 0.3s;
+    }
+    
+    /* Add a slight highlight to code blocks */
+    .markdown-body pre {
+        background-color: #f6f8fa;
+        border-radius: 3px;
+        padding: 16px;
+    }
+</style>
+{% endblock %} 

@@ -43,6 +43,42 @@ This file documents errors and issues encountered during the development of Lazy
    - **Cause**: The _extract_html_content method was using self.search_url instead of the search_engine parameter passed to conduct_research.
    - **Fix**: Modified the _extract_html_content method to accept a search_engine parameter and updated the conduct_research method to pass this parameter when calling _extract_html_content.
 
+## Process_Topic Method Error
+
+**Error Message:**
+```
+Error during research: 'LazyScholar' object has no attribute 'process_topic'
+```
+
+**Problem:** The `CancellableResearch` wrapper class in app.py was trying to call `self.scholar.process_topic()` which doesn't exist in the LazyScholar class.
+
+**Solution:**
+- Implemented the full `conduct_research` method's functionality directly in the `CancellableResearch.conduct_research` method
+- Added cancellation checks at key points in the research process
+- Ensured proper browser cleanup on cancellation or errors
+
+**Implementation Details:**
+1. Maintains the same basic workflow for research:
+   - Process topics and subtopics
+   - For each subtopic:
+     - Generate search query
+     - Search for sources (PDF or HTML)
+     - Extract content
+     - Write subtopic files
+   - Generate final paper
+
+2. Added cancellation checks at critical points:
+   - Before starting browser
+   - Before processing each topic
+   - Before processing each subtopic
+   - Before/after searching for sources
+   - Before generating final paper
+
+3. Error handling with proper cleanup:
+   - Wrapped main processing in try/except
+   - Ensures browser is closed on errors
+   - Returns appropriate status to caller
+
 ## Future Improvements
 
 1. **Content Type Detection**: Improve automatic detection of content type (academic, practical, travel) based on the problem statement.
@@ -3097,3 +3133,14 @@ For MySQL/PostgreSQL:
 ```sql
 ALTER TABLE research_profile ADD COLUMN output_format VARCHAR(10) DEFAULT 'md';
 ```
+
+## Error: Missing process_topic method in CancellableResearch
+- **Problem**: The `CancellableResearch` wrapper class in app.py was trying to call `self.scholar.process_topic()` which doesn't exist in the LazyScholar class.
+- **Solution**: Implemented the full `conduct_research` method's functionality directly in the `CancellableResearch.conduct_research` method, adapting it to include cancellation checks at appropriate points.
+
+## Key Fixes
+1. Replaced the call to non-existent `process_topic` with direct implementation of topic and subtopic processing
+2. Added proper error handling with try/except blocks
+3. Added cancellation checks at critical points in the research process
+4. Properly referenced topic and subtopic properties with the correct names ('title' instead of 'name')
+5. Ensured the browser is correctly closed when research is cancelled

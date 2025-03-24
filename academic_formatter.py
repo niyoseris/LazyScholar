@@ -13,14 +13,17 @@ import os
 import re
 import logging
 import argparse
-from pathlib import Path
+import traceback
 import google.generativeai as genai
+from pathlib import Path
 from dotenv import load_dotenv
 import json
 import PyPDF2
 import requests
 import time
 from PIL import Image
+import langcodes
+import langdetect
 
 # Configure logging
 logging.basicConfig(
@@ -470,9 +473,16 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
         title = None
         
         # Extract title and sections
-        for line in content.split('\n'):
+        lines = content.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            
+            # Extract title
             if line.startswith('# '):
                 title = line[2:].strip()
+            
+            # Extract sections
             elif line.startswith('## '):
                 # Save previous section if any
                 if current_section:
@@ -481,12 +491,20 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
                 # Start new section
                 current_section = line[3:].strip()
                 section_content = []
+            
+            # Add content to current section
             elif current_section:
                 section_content.append(line)
+            
+            i += 1
         
         # Save the last section
         if current_section and section_content:
             sections[current_section] = section_content
+        
+        # Log the extracted structure for debugging
+        logger.info(f"Extracted paper title: {title}")
+        logger.info(f"Found {len(sections)} sections: {', '.join(sections.keys())}")
         
         # Step 2: Extract existing references
         references = []
@@ -497,7 +515,9 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
                 # Numbered references
                 re.compile(r'(?:^|\n)(?:\d+\.\s+)?(.*?)(?=\n\d+\.|$)', re.DOTALL),
                 # Topic-subtopic references
-                re.compile(r'\*\*.*?\*\*:\s*(.*?)(?=\n\*\*|\Z)', re.DOTALL)
+                re.compile(r'\*\*.*?\*\*:\s*(.*?)(?=\n\*\*|\Z)', re.DOTALL),
+                # Simple bulleted references
+                re.compile(r'(?:^|\n)(?:-\s+)(.*?)(?=\n-\s+|\Z)', re.DOTALL)
             ]
             
             for pattern in ref_patterns:
@@ -529,6 +549,7 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
             # Clean up reference
             ref = re.sub(r'^SOURCE \d+:\s*', '', ref)  # Remove SOURCE prefix
             ref = re.sub(r'^\d+\.\s+', '', ref)  # Remove numbering
+            ref = ref.strip()
             
             # Skip if empty or too short
             if not ref or len(ref) < 5:
@@ -567,7 +588,7 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
             main_language = preferred_language
             logger.info(f"Using user-specified language: {main_language}")
         
-        # Step 6: Format the paper with consistent language and in-text citations
+        # Step 6: Format the paper with consistent language
         formatted_sections = {}
         
         # Process each section
@@ -579,21 +600,40 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
                 continue  # Skip references section, we'll create a new one
             
             processed_sections += 1
+            logger.info(f"Processing section {processed_sections}/{total_sections}: {section_name}")
             print(f"Processing section {processed_sections}/{total_sections}: {section_name}")
             
+            # Ensure we use the full content
             section_text = "\n".join(section_lines)
+            logger.info(f"Section '{section_name}' content length: {len(section_text)} characters")
             
+            # Check if this section is empty or just whitespace
+            if not section_text.strip():
+                logger.warning(f"Section '{section_name}' is empty or contains only whitespace")
+                formatted_sections[section_name] = []
+                continue
+                
             # Check if this section needs language correction
+            section_language = main_language
             if len(section_text) > 50:  # Only check substantial sections
-                section_language = detect_language(model, section_text[:500], default_language=main_language)
+                try:
+                    sample_text = section_text[:min(500, len(section_text))]
+                    section_language = detect_language(model, sample_text, default_language=main_language)
+                    logger.info(f"Section '{section_name}' language detected as {section_language}")
+                except Exception as e:
+                    logger.warning(f"Error detecting language for section '{section_name}': {str(e)}")
                 
                 # If section language doesn't match main language, translate it
                 if section_language != main_language:
                     logger.info(f"Translating section '{section_name}' from {section_language} to {main_language}")
                     print(f"  - Translating from {section_language} to {main_language}...")
-                    section_text = translate_text(model, section_text, section_language, main_language)
+                    try:
+                        section_text = translate_text(model, section_text, section_language, main_language)
+                        logger.info(f"Successfully translated section '{section_name}'")
+                    except Exception as e:
+                        logger.error(f"Error translating section '{section_name}': {str(e)}")
             
-            # Format in-text citations
+            # Format in-text citations - prevent empty sections from being lost
             print(f"  - Formatting citations...")
             citation_prompt = f"""
             Format the following academic text with simple in-text citations. 
@@ -601,6 +641,8 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
             For example, if the reference is "1.pdf", use the citation format (1.pdf).
             DO NOT add any new information or change the meaning of the text.
             DO NOT add any citations that are not already present in the text.
+            DO NOT summarize or shorten the text - maintain ALL original content.
+            DO NOT remove or skip any part of the original text.
             
             Here are the available references:
             {chr(10).join([f"- {ref}" for ref in all_references[:20]])}
@@ -612,9 +654,41 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
             try:
                 citation_response = api_call_with_retry(lambda: model.generate_content(citation_prompt))
                 formatted_text = citation_response.text.strip()
+                
+                # Verify content hasn't been significantly shortened
+                original_word_count = len(section_text.split())
+                formatted_word_count = len(formatted_text.split())
+                
+                # If the word count has decreased significantly, log a warning and check content
+                word_ratio = formatted_word_count / original_word_count if original_word_count > 0 else 0
+                logger.info(f"Section '{section_name}' word count: original {original_word_count}, formatted {formatted_word_count}, ratio {word_ratio:.2f}")
+                
+                if word_ratio < 0.8 and original_word_count > 50:
+                    logger.warning(f"Section '{section_name}' content may have been reduced: {original_word_count} to {formatted_word_count} words")
+                    
+                    # For significant reductions, retry with a more explicit prompt
+                    if word_ratio < 0.5:
+                        logger.warning(f"Retrying section '{section_name}' with stronger preservation instructions")
+                        citation_prompt = f"""
+                        Format the following academic text, preserving EVERY SINGLE SENTENCE in its entirety.
+                        DO NOT summarize or shorten the text in any way.
+                        DO NOT omit any content.
+                        DO NOT change the meaning of any sentence.
+                        Keep ALL content from the original text.
+                        Please return the COMPLETE text, formatted consistently.
+                        
+                        Text to format exactly as is:
+                        {section_text}
+                        """
+                        
+                        citation_response = api_call_with_retry(lambda: model.generate_content(citation_prompt))
+                        formatted_text = citation_response.text.strip()
+                        logger.info(f"Retry completed for section '{section_name}'")
+                
                 formatted_sections[section_name] = formatted_text.split('\n')
             except Exception as e:
-                logger.warning(f"Error formatting citations in section {section_name}: {str(e)}")
+                logger.warning(f"Error formatting section {section_name}: {str(e)}")
+                # Use original content if formatting fails
                 formatted_sections[section_name] = section_lines
         
         # Step 7: Assemble the formatted paper
@@ -635,6 +709,7 @@ def format_as_academic_paper(model, content, pdf_paths, preferred_language="auto
         return formatted_paper
     except Exception as e:
         logger.error(f"Error formatting academic paper: {str(e)}")
+        traceback.print_exc()
         return None
 
 def save_formatted_paper(final_paper_path, formatted_paper):
@@ -761,8 +836,7 @@ def main():
         logger.warning("Process interrupted by user")
     except Exception as e:
         logger.error(f"Error in main process: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
+        traceback.print_exc()
         print(f"\n❌ Error: {str(e)}")
         print("Please check the academic_formatter.log file for details.")
 
