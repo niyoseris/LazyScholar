@@ -2,6 +2,117 @@
 
 This file documents errors and issues encountered during the development of LazyScholar, along with their solutions.
 
+# Database Schema Migration Issue
+
+## Issue: Missing topics_and_subtopics Column in Database
+
+**Error Message:**
+```
+sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such column: research_profile.topics_and_subtopics
+```
+
+**Problem Description:**
+The application model defined a `topics_and_subtopics` column in the `ResearchProfile` model, but this column was not present in the actual database schema. This happened because the model was updated without running the appropriate database migrations.
+
+**Impact:**
+- Application crashed when trying to access the dashboard with a 500 error
+- Users couldn't view or manage their research profiles
+- All database operations related to ResearchProfile models failed
+
+**Solution:**
+1. Created a database migration to add the missing column:
+```bash
+flask db migrate -m "Add topics_and_subtopics column to ResearchProfile"
+```
+
+2. Applied the migration to update the database schema:
+```bash
+flask db upgrade
+```
+
+**Prevention:**
+Always follow this workflow when making changes to database models:
+1. Update the model class in the code
+2. Generate a migration to reflect the changes: `flask db migrate -m "description"`
+3. Review the generated migration file to ensure it's correct
+4. Apply the migration: `flask db upgrade`
+5. Test that the changes work as expected
+
+This process ensures that the database schema remains synchronized with the application models, preventing similar errors in the future.
+
+# Function Parameter Mismatch Issue
+
+## Issue: run_research_task Parameter Count Mismatch
+
+**Error Message:**
+```
+TypeError: run_research_task() takes from 1 to 2 positional arguments but 3 were given
+```
+
+**Problem Description:**
+The `run_research_task` function signature was updated to accept only the `profile_id` and optionally a `task_id`, but the `start_research` function was still calling it with three arguments: `profile` object, `profile_id`, and `task_id`.
+
+**Solution:**
+Updated the `start_research` function to call `run_research_task` with only the required parameters:
+
+```python
+# Old code in start_research
+@copy_current_request_context
+def run_research_with_context(profile, profile_id, task_id):
+    return run_research_task(profile, profile_id, task_id)
+
+thread = threading.Thread(target=run_research_with_context, args=(profile, profile_id, task_id))
+
+# New code in start_research
+@copy_current_request_context
+def run_research_with_context(profile_id, task_id):
+    return run_research_task(profile_id, task_id)
+
+thread = threading.Thread(target=run_research_with_context, args=(profile_id, task_id))
+```
+
+This ensures proper parameter matching when calling the function from a background thread. The function now fetches the profile object inside its implementation using `ResearchProfile.query.get(profile_id)` instead of receiving it as a parameter.
+
+# SQLAlchemy Compatibility Implementation
+
+## Current Project Implementation
+
+This project is currently using an older version of Flask-SQLAlchemy that doesn't support direct methods on the `db` object like `db.get()` or `db.get_or_404()`. Instead, it uses the traditional Query API pattern.
+
+### Our Implementation Approach
+
+Throughout the codebase, we've standardized on using:
+
+```python
+# For retrieving an object by primary key
+model = Model.query.get(id)
+
+# For retrieving an object with 404 handling
+model = Model.query.get_or_404(id)
+```
+
+This approach ensures compatibility with the current version of Flask-SQLAlchemy being used in the project. If the project is upgraded to Flask-SQLAlchemy 3.0+ in the future, these patterns would need to be updated to use the newer API methods.
+
+### Key Areas Updated
+
+1. User loading (`load_user` function)
+2. Profile retrieval in all routes
+3. Background task handling in `run_research_task`
+4. Research cancellation in `cancel_research`
+
+### Benefits of This Approach
+
+- **Consistency**: Using the same pattern throughout the codebase
+- **Compatibility**: Works with the current version of Flask-SQLAlchemy
+- **Clarity**: Clear distinction between different SQLAlchemy APIs
+- **Maintainability**: Easier to upgrade in the future by updating all instances at once
+
+### Common Errors Avoided
+
+By using this approach, we avoid these common errors:
+- `AttributeError: 'scoped_session' object has no attribute 'get_or_404'`
+- `AttributeError: 'SQLAlchemy' object has no attribute 'get'`
+
 ## UI/UX Issues
 
 1. **PDF-Focused Terminology**: The application used PDF-specific terminology like "Max PDFs" and "Minimum PDFs" which made it seem like the application only worked with PDFs. 
@@ -3144,3 +3255,782 @@ ALTER TABLE research_profile ADD COLUMN output_format VARCHAR(10) DEFAULT 'md';
 3. Added cancellation checks at critical points in the research process
 4. Properly referenced topic and subtopic properties with the correct names ('title' instead of 'name')
 5. Ensured the browser is correctly closed when research is cancelled
+
+# Errors and Issues to Avoid
+
+## Topics and Subtopics Editor Implementation
+
+1. **CSS Selector Errors in JavaScript** - When using selectors in JavaScript that check for text content (like `p strong:contains("Current Step")`), it's better to use more reliable DOM traversal methods like finding the element first by tag/class and then checking its textContent property.
+
+2. **jQuery Selectors in Vanilla JavaScript** - Some jQuery-style selectors like `:contains()` don't work in vanilla JavaScript querySelector(). Use alternative approaches for text content filtering.
+
+3. **File Existence Checking** - Always verify file existence before trying to read or parse files, especially generated content files like topics_and_subtopics.md.
+
+4. **Updating Browser UI with Server-Sent Events** - When using SSE (Server-Sent Events) to update the UI in real-time, make sure to properly handle cases where elements may not exist yet in the DOM.
+
+5. **Handling Long-Running Tasks** - For research tasks that may take time, implement proper status tracking and user feedback mechanisms, including cancellation options and visual progress indicators.
+
+6. **CRUD Operations on Markdown Files** - When implementing CRUD (Create, Read, Update, Delete) operations on content in markdown files, carefully parse the file structure and maintain formatting when writing back changes.
+
+## Other Existing Errors
+
+<!-- Preserve any existing content below -->
+
+# Flask Application Context Error
+
+## Issue: Working outside of application context
+
+Error message: 
+```
+Working outside of application context.
+
+This typically means that you attempted to use functionality that needed
+the current application. To solve this, set up an application context
+with app.app_context(). See the documentation for more information.
+```
+
+## Solution
+
+This error occurs when trying to access Flask-specific functionality (like database operations) outside of a request context. There are two common scenarios where this happens:
+
+1. In background threads
+2. In scheduled tasks
+
+### For threads:
+
+Use Flask's `copy_current_request_context` decorator to ensure the thread inherits the request context:
+
+```python
+from flask import copy_current_request_context
+
+@app.route('/start_task')
+def start_task():
+    @copy_current_request_context
+    def task_with_context():
+        # This function inherits the request context
+        # Database operations work here
+    
+    thread = threading.Thread(target=task_with_context)
+    thread.start()
+    return "Task started"
+```
+
+### For operations outside request context:
+
+Use Flask's application context:
+
+```python
+with app.app_context():
+    # Database operations work here
+    db.session.add(some_model)
+    db.session.commit()
+```
+
+## SQLAlchemy Deprecation Warning
+
+When using SQLAlchemy 1.4+ with Flask-SQLAlchemy, you may also see warnings about deprecated Query methods:
+
+```
+LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0
+```
+
+### Solution:
+
+Update your code to use the new patterns:
+
+Old pattern:
+```python
+user = User.query.get(user_id)
+user = User.query.get_or_404(user_id)
+```
+
+New pattern:
+```python
+user = db.session.get(User, user_id)
+user = db.session.get_or_404(User, user_id)
+```
+
+# Errors and Issues to Avoid
+
+## Topics and Subtopics Editor Implementation
+
+1. **CSS Selector Errors in JavaScript** - When using selectors in JavaScript that check for text content (like `p strong:contains("Current Step")`), it's better to use more reliable DOM traversal methods like finding the element first by tag/class and then checking its textContent property.
+
+2. **jQuery Selectors in Vanilla JavaScript** - Some jQuery-style selectors like `:contains()` don't work in vanilla JavaScript querySelector(). Use alternative approaches for text content filtering.
+
+3. **File Existence Checking** - Always verify file existence before trying to read or parse files, especially generated content files like topics_and_subtopics.md.
+
+4. **Updating Browser UI with Server-Sent Events** - When using SSE (Server-Sent Events) to update the UI in real-time, make sure to properly handle cases where elements may not exist yet in the DOM.
+
+5. **Handling Long-Running Tasks** - For research tasks that may take time, implement proper status tracking and user feedback mechanisms, including cancellation options and visual progress indicators.
+
+6. **CRUD Operations on Markdown Files** - When implementing CRUD (Create, Read, Update, Delete) operations on content in markdown files, carefully parse the file structure and maintain formatting when writing back changes.
+
+## Other Existing Errors
+
+<!-- Preserve any existing content below -->
+
+# SQLAlchemy 2.0 Migration Issue: get_or_404 Method
+
+## Issue: 'scoped_session' object has no attribute 'get_or_404'
+
+Error message: 
+```
+AttributeError: 'scoped_session' object has no attribute 'get_or_404'
+```
+
+## Solution
+
+This error occurs when using SQLAlchemy with Flask-SQLAlchemy and trying to use the newer session-based API pattern with version-specific methods. The `get_or_404` method isn't directly available on the session object in newer versions.
+
+### Fix
+
+Use `db.get_or_404` instead of `db.session.get_or_404`:
+
+```python
+# Incorrect
+profile = db.session.get_or_404(ResearchProfile, profile_id)
+
+# Correct
+profile = db.get_or_404(ResearchProfile, profile_id)
+```
+
+Similarly, for regular `get` operations:
+
+```python
+# Incorrect
+profile = db.session.get(ResearchProfile, profile_id)
+
+# Correct
+profile = db.get(ResearchProfile, profile_id)
+```
+
+### Why this occurs
+
+In Flask-SQLAlchemy 3.0 (which supports SQLAlchemy 2.0), the extension provides direct access to these methods via the `db` object itself rather than through the session. This is part of the migration to the new SQLAlchemy API patterns.
+
+# Flask-SQLAlchemy API Compatibility
+
+## Issue: AttributeError: get
+
+Error message:
+```
+AttributeError: get
+```
+
+## Cause
+
+This error occurs when using `db.get()` with a version of Flask-SQLAlchemy that doesn't support this method directly on the `db` object. The availability of methods depends on the version of Flask-SQLAlchemy being used.
+
+## Solution
+
+### Version Compatibility
+
+**For Flask-SQLAlchemy < 3.0:**
+```python
+# Use the Query API
+user = User.query.get(user_id)
+user = User.query.get_or_404(user_id)
+
+# Or use db.session directly
+user = db.session.get(User, user_id)  # Available in SQLAlchemy 1.4+
+```
+
+**For Flask-SQLAlchemy >= 3.0:**
+```python
+# Can use methods directly on db object
+user = db.get(User, user_id)
+user = db.get_or_404(User, user_id)
+
+# Or use the traditional Query API (though this might show deprecation warnings)
+user = User.query.get(user_id)
+```
+
+### Code Migration
+
+When migrating between versions, it's important to check which methods are available in your specific version of Flask-SQLAlchemy. If you encounter the `AttributeError: get`, it means your version doesn't support using `get` directly on the `db` object.
+
+### Best Practice
+
+To ensure code compatibility across different Flask-SQLAlchemy versions:
+
+1. Check your Flask-SQLAlchemy version: `pip show flask-sqlalchemy`
+2. Use the appropriate method patterns for your version
+3. When upgrading, update your code patterns to match the new API
+
+# SQLAlchemy 2.0 Migration Issue: get_or_404 Method
+
+## Issue: 'scoped_session' object has no attribute 'get_or_404'
+
+Error message: 
+```
+AttributeError: 'scoped_session' object has no attribute 'get_or_404'
+```
+
+## Solution
+
+This error occurs when using SQLAlchemy with Flask-SQLAlchemy and trying to use the newer session-based API pattern with version-specific methods. The `get_or_404` method isn't directly available on the session object in newer versions.
+
+### Fix
+
+For Flask-SQLAlchemy < 3.0, use the Query API:
+
+```python
+# Correct for Flask-SQLAlchemy < 3.0
+profile = ResearchProfile.query.get_or_404(profile_id)
+```
+
+For regular `get` operations:
+
+```python
+# Correct for Flask-SQLAlchemy < 3.0 with SQLAlchemy 1.4+
+profile = db.session.get(ResearchProfile, profile_id)
+```
+
+For Flask-SQLAlchemy >= 3.0:
+```python
+# Correct for newer Flask-SQLAlchemy versions
+profile = db.get_or_404(ResearchProfile, profile_id)
+profile = db.get(ResearchProfile, profile_id)
+```
+
+### Why this occurs
+
+In Flask-SQLAlchemy 3.0 (which supports SQLAlchemy 2.0), the extension provides direct access to these methods via the `db` object itself rather than through the session or query. This is part of the migration to the new SQLAlchemy API patterns.
+
+# Flask Application Context Error
+
+## Issue: Working outside of application context
+
+Error message: 
+```
+Working outside of application context.
+
+This typically means that you attempted to use functionality that needed
+the current application. To solve this, set up an application context
+with app.app_context(). See the documentation for more information.
+```
+
+## Solution
+
+This error occurs when trying to access Flask-specific functionality (like database operations) outside of a request context. There are two common scenarios where this happens:
+
+1. In background threads
+2. In scheduled tasks
+
+### For threads:
+
+Use Flask's `copy_current_request_context` decorator to ensure the thread inherits the request context:
+
+```python
+from flask import copy_current_request_context
+
+@app.route('/start_task')
+def start_task():
+    @copy_current_request_context
+    def task_with_context():
+        # This function inherits the request context
+        # Database operations work here
+    
+    thread = threading.Thread(target=task_with_context)
+    thread.start()
+    return "Task started"
+```
+
+### For operations outside request context:
+
+Use Flask's application context:
+
+```python
+with app.app_context():
+    # Database operations work here
+    db.session.add(some_model)
+    db.session.commit()
+```
+
+## SQLAlchemy Deprecation Warning
+
+When using SQLAlchemy 1.4+ with Flask-SQLAlchemy, you may also see warnings about deprecated Query methods:
+
+```
+LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0
+```
+
+### Solution:
+
+Update your code to use the new patterns:
+
+Old pattern:
+```python
+user = User.query.get(user_id)
+user = User.query.get_or_404(user_id)
+```
+
+New pattern (SQLAlchemy 1.4+ with Flask-SQLAlchemy < 3.0):
+```python
+user = db.session.get(User, user_id)
+# But still use query for get_or_404
+user = User.query.get_or_404(user_id)
+```
+
+Even newer pattern (Flask-SQLAlchemy 3.0):
+```python
+user = db.get(User, user_id)
+user = db.get_or_404(User, user_id)
+```
+
+# Errors and Issues to Avoid
+
+## Topics and Subtopics Editor Implementation
+
+1. **CSS Selector Errors in JavaScript** - When using selectors in JavaScript that check for text content (like `p strong:contains("Current Step")`), it's better to use more reliable DOM traversal methods like finding the element first by tag/class and then checking its textContent property.
+
+2. **jQuery Selectors in Vanilla JavaScript** - Some jQuery-style selectors like `:contains()` don't work in vanilla JavaScript querySelector(). Use alternative approaches for text content filtering.
+
+3. **File Existence Checking** - Always verify file existence before trying to read or parse files, especially generated content files like topics_and_subtopics.md.
+
+4. **Updating Browser UI with Server-Sent Events** - When using SSE (Server-Sent Events) to update the UI in real-time, make sure to properly handle cases where elements may not exist yet in the DOM.
+
+5. **Handling Long-Running Tasks** - For research tasks that may take time, implement proper status tracking and user feedback mechanisms, including cancellation options and visual progress indicators.
+
+6. **CRUD Operations on Markdown Files** - When implementing CRUD (Create, Read, Update, Delete) operations on content in markdown files, carefully parse the file structure and maintain formatting when writing back changes.
+
+## Other Existing Errors
+
+<!-- Preserve any existing content below -->
+
+# Missing Parameter in run_research Function
+
+## Issue: Missing Progress Parameter
+
+**Error Message:**
+```
+TypeError: run_research() got an unexpected keyword argument 'progress'
+```
+
+**Problem Description:**
+The `run_research_task` function was passing a `progress` parameter to the `run_research` function, but the `run_research` function wasn't defined to accept this parameter.
+
+**Solution:**
+Updated the `run_research` function signature to include the `progress` parameter:
+
+```python
+def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=True, 
+                language='en', search_suffix=None, headless=True, site_tld=None,
+                minimum_pdfs=3, crawl_depth=3, max_crawl_pages=20, search_purpose='academic',
+                require_pdfs=True, task_id=None, search_engine=None, output_format='md', progress=None):
+```
+
+Also modified the function to check if progress is provided instead of always creating a new instance:
+
+```python
+# Create or get progress tracker
+if not progress:
+    if not task_id:
+        task_id = str(uuid.uuid4())
+    progress = ResearchProgress.get_instance(task_id)
+```
+
+## Issue: Missing Search Engine Parameter
+
+**Error Message:**
+```
+TypeError: run_research() missing 1 required positional argument: 'search_engine'
+```
+
+**Problem Description:**
+The call to `run_research` from `run_research_task` was missing the required `search_engine` parameter.
+
+**Solution:**
+Updated the call to include all the necessary parameters from the profile:
+
+```python
+result = run_research(
+    problem_statement=search_query,
+    output_dir=output_dir,
+    max_pdfs=max_pdfs,
+    require_pdfs=require_pdfs,
+    academic_format=academic_format,
+    language=language,
+    progress=progress,
+    task_id=task_id,
+    search_engine=profile.search_url,
+    site_tld=profile.site_tld,
+    minimum_pdfs=profile.minimum_pdfs,
+    crawl_depth=profile.crawl_depth,
+    max_crawl_pages=profile.max_crawl_pages,
+    search_purpose=profile.search_purpose,
+    output_format=profile.output_format
+)
+```
+
+# Research Task Management Issues
+
+## Issue: Research Task Not Waiting for User Approval
+
+**Problem Description:**
+The research task was not pausing to wait for user approval of topics and subtopics. It was generating topics and then immediately continuing with the research process without waiting for user review and approval.
+
+**Impact:**
+- Users couldn't review or modify topics before the actual research started
+- Wasted resources on potentially unwanted research directions
+- No opportunity to refine the research scope before committing resources
+
+**Solution:**
+Modified the `run_research_task` function to:
+1. Generate topics and subtopics in a preliminary phase
+2. Update the status to "waiting" and pause execution in a loop
+3. Wait until the user either approves topics or cancels the research
+4. Continue with the full research process only after explicit approval
+
+```python
+# Update status to waiting for user approval
+progress.update(status="waiting", progress=30, 
+               current_step="Waiting for user approval", 
+               message="Topics and subtopics have been generated. Please review and approve to continue.")
+
+# Wait for user approval or cancellation
+while progress.status == "waiting" and not progress.is_cancelled():
+    time.sleep(2)
+```
+
+## Issue: Research Task Cancellation Not Working
+
+**Problem Description:**
+The cancel button was not effectively stopping the research process. The cancellation mechanism had several issues:
+1. The task was marked as cancelled but the active_task_id wasn't always cleared
+2. The browser wasn't immediately closed when tasks were cancelled
+3. The progress status was updated to "cancelled" but background processes continued
+
+**Solution:**
+1. Updated the `cancel_research` route to:
+   - First cancel the task by calling `progress.cancel()`
+   - Then clear the active_task_id from the profile
+   - Add proper error handling and user feedback
+   
+2. Updated the `run_research_task` function to check for cancellation:
+   - Added a cancellation check in the waiting loop
+   - Added a final check after the waiting loop ends
+   - Ensured proper cleanup on cancellation
+
+3. Added cancel buttons to:
+   - topics_approval_waiting.html
+   - topics_approval.html
+
+```python
+# Check if the task was cancelled during waiting
+if progress.is_cancelled():
+    logger.info(f"Research task {task_id} was cancelled")
+    profile.active_task_id = None
+    db.session.commit()
+    return False
+```
+
+# Jinja2 Template Error
+
+## Issue: UndefinedError in topics_editor.html Template
+
+**Error Message:**
+```
+jinja2.exceptions.UndefinedError: 'jinja2.runtime.LoopContext object' has no attribute 'parent'
+```
+
+**Problem Description:**
+In the topics_editor.html template, there was an attempt to access `loop.parent.index0` within the subtopic loop to get the index of the current topic from the outer loop. However, `loop.parent` is not available in this context in Jinja2.
+
+**Impact:**
+- The topics editor page crashed with a 500 server error
+- Users were unable to edit topics and subtopics
+- This prevented users from modifying generated topics before approving them
+
+**Solution:**
+1. Captured the current topic index in a variable before entering the subtopic loop:
+```jinja
+{% set topic_index = loop.index0 %}
+```
+
+2. Used this variable instead of trying to access the parent loop:
+```jinja
+<button type="button" class="btn btn-sm btn-outline-primary edit-subtopic-btn" 
+        data-topic-index="{{ topic_index }}" 
+        data-subtopic-index="{{ loop.index0 }}">
+```
+
+3. Also updated the add subtopic form to use the same variable:
+```jinja
+<input type="hidden" name="topic_index" value="{{ topic_index }}">
+```
+
+**Best Practice:**
+When working with nested loops in Jinja2 templates, it's better to capture loop indices in variables at each level rather than relying on parent loop access, which may not be consistently available across different Jinja2 versions and contexts.
+
+# Research Task Management Issues
+
+## Issue: Research Task Not Waiting for User Approval
+
+**Problem Description:**
+The research task was not pausing to wait for user approval of topics and subtopics. It was generating topics and then immediately continuing with the research process without waiting for user review and approval.
+
+**Impact:**
+- Users couldn't review or modify topics before the actual research started
+- Wasted resources on potentially unwanted research directions
+- No opportunity to refine the research scope before committing resources
+
+**Solution:**
+Modified the `run_research_task` function to:
+1. Generate topics and subtopics in a preliminary phase
+2. Update the status to "waiting" and pause execution in a loop
+3. Wait until the user either approves topics or cancels the research
+4. Continue with the full research process only after explicit approval
+
+```python
+# Update status to waiting for user approval
+progress.update(status="waiting", progress=30, 
+               current_step="Waiting for user approval", 
+               message="Topics and subtopics have been generated. Please review and approve to continue.")
+
+# Wait for user approval or cancellation
+while progress.status == "waiting" and not progress.is_cancelled():
+    time.sleep(2)
+```
+
+## Issue: Research Task Cancellation Not Working
+
+**Problem Description:**
+The cancel button was not effectively stopping the research process. The cancellation mechanism had several issues:
+1. The task was marked as cancelled but the active_task_id wasn't always cleared
+2. The browser wasn't immediately closed when tasks were cancelled
+3. The progress status was updated to "cancelled" but background processes continued
+
+**Solution:**
+1. Updated the `cancel_research` route to:
+   - First cancel the task by calling `progress.cancel()`
+   - Then clear the active_task_id from the profile
+   - Add proper error handling and user feedback
+   
+2. Updated the `run_research_task` function to check for cancellation:
+   - Added a cancellation check in the waiting loop
+   - Added a final check after the waiting loop ends
+   - Ensured proper cleanup on cancellation
+
+3. Added cancel buttons to:
+   - topics_approval_waiting.html
+   - topics_approval.html
+
+```python
+# Check if the task was cancelled during waiting
+if progress.is_cancelled():
+    logger.info(f"Research task {task_id} was cancelled")
+    profile.active_task_id = None
+    db.session.commit()
+    return False
+```
+
+# Topics Editor Workflow Enhancement
+
+## Issue: No Direct Path from Editing to Approval
+
+**Problem Description:**
+When users edit topics and subtopics in the editor, they have to first save the changes, then navigate back to the approval page, and finally click "Approve" to start the research. This multi-step process is cumbersome and leads to confusion.
+
+**Impact:**
+- Users often save their changes but forget to approve them
+- Research process is delayed with unnecessary navigation steps
+- Poor user experience with multiple clicks required for a common task
+
+**Solution:**
+Added a "Save and Approve" button in the topics editor page that combines both actions:
+
+1. Added a new button to the topics_editor.html template:
+```html
+<button type="submit" id="save-and-approve-btn" class="btn btn-success" name="approve" value="true">
+    <i class="fas fa-check"></i> Save and Approve
+</button>
+```
+
+2. Enhanced the topics_editor route to handle this combined action:
+```python
+# Check if this is a "Save and Approve" action
+if request.form.get('approve') == 'true':
+    # If there's an active task, update its status to approve it
+    if profile.active_task_id:
+        progress = ResearchProgress.get_instance(profile.active_task_id)
+        if progress.status == 'waiting':
+            # Update progress to resume the research process
+            progress.update(status="running", current_step="Topics approved", 
+                          message="Topics and subtopics approved by user, continuing research")
+            flash("Research is continuing with the updated topics and subtopics", "success")
+            return redirect(url_for('view_profile', profile_id=profile_id))
+        else:
+            # Start a new research if there's no waiting task
+            return redirect(url_for('start_research', profile_id=profile_id))
+    else:
+        # If no active task, start a new research
+        return redirect(url_for('start_research', profile_id=profile_id))
+```
+
+This enhancement allows users to make changes to topics and subtopics and immediately continue the research process with a single click, without needing to navigate to a separate page for approval.
+
+# Jinja2 Template Error
+
+## Issue: UndefinedError in topics_editor.html Template
+
+**Error Message:**
+```
+jinja2.exceptions.UndefinedError: 'jinja2.runtime.LoopContext object' has no attribute 'parent'
+```
+
+**Problem Description:**
+In the topics_editor.html template, there was an attempt to access `loop.parent.index0` within the subtopic loop to get the index of the current topic from the outer loop. However, `loop.parent` is not available in this context in Jinja2.
+
+**Impact:**
+- The topics editor page crashed with a 500 server error
+- Users were unable to edit topics and subtopics
+- This prevented users from modifying generated topics before approving them
+
+**Solution:**
+1. Captured the current topic index in a variable before entering the subtopic loop:
+```jinja
+{% set topic_index = loop.index0 %}
+```
+
+2. Used this variable instead of trying to access the parent loop:
+```jinja
+<button type="button" class="btn btn-sm btn-outline-primary edit-subtopic-btn" 
+        data-topic-index="{{ topic_index }}" 
+        data-subtopic-index="{{ loop.index0 }}">
+```
+
+3. Also updated the add subtopic form to use the same variable:
+```jinja
+<input type="hidden" name="topic_index" value="{{ topic_index }}">
+```
+
+**Best Practice:**
+When working with nested loops in Jinja2 templates, it's better to capture loop indices in variables at each level rather than relying on parent loop access, which may not be consistently available across different Jinja2 versions and contexts.
+
+# Research Task Management Issues
+
+## Issue: Research Task Not Waiting for User Approval
+
+**Problem Description:**
+The research task was not pausing to wait for user approval of topics and subtopics. It was generating topics and then immediately continuing with the research process without waiting for user review and approval.
+
+**Impact:**
+- Users couldn't review or modify topics before the actual research started
+- Wasted resources on potentially unwanted research directions
+- No opportunity to refine the research scope before committing resources
+
+**Solution:**
+Modified the `run_research_task` function to:
+1. Generate topics and subtopics in a preliminary phase
+2. Update the status to "waiting" and pause execution in a loop
+3. Wait until the user either approves topics or cancels the research
+4. Continue with the full research process only after explicit approval
+
+```python
+# Update status to waiting for user approval
+progress.update(status="waiting", progress=30, 
+               current_step="Waiting for user approval", 
+               message="Topics and subtopics have been generated. Please review and approve to continue.")
+
+# Wait for user approval or cancellation
+while progress.status == "waiting" and not progress.is_cancelled():
+    time.sleep(2)
+```
+
+## Issue: Research Task Cancellation Not Working
+
+**Problem Description:**
+The cancel button was not effectively stopping the research process. The cancellation mechanism had several issues:
+1. The task was marked as cancelled but the active_task_id wasn't always cleared
+2. The browser wasn't immediately closed when tasks were cancelled
+3. The progress status was updated to "cancelled" but background processes continued
+
+**Solution:**
+1. Updated the `cancel_research` route to:
+   - First cancel the task by calling `progress.cancel()`
+   - Then clear the active_task_id from the profile
+   - Add proper error handling and user feedback
+   
+2. Updated the `run_research_task` function to check for cancellation:
+   - Added a cancellation check in the waiting loop
+   - Added a final check after the waiting loop ends
+   - Ensured proper cleanup on cancellation
+
+3. Added cancel buttons to:
+   - topics_approval_waiting.html
+   - topics_approval.html
+
+```python
+# Check if the task was cancelled during waiting
+if progress.is_cancelled():
+    logger.info(f"Research task {task_id} was cancelled")
+    profile.active_task_id = None
+    db.session.commit()
+    return False
+```
+
+# Task ID Format Issue
+
+## Issue: Invalid Task ID Format Error When Cancelling Research
+
+**Error Message:**
+```
+Invalid task ID format
+```
+
+**Problem Description:**
+When trying to cancel a research task, the application was failing with "Invalid task ID format" error. This occurred because the cancel_research function was too strict in its task_id parsing logic, expecting the exact format "research_profile_id_timestamp" and failing if the format was slightly different.
+
+**Impact:**
+- Users couldn't cancel their research tasks
+- Research continued to run in the background consuming resources
+- Users had to restart the application to stop ongoing research
+
+**Solution:**
+Made the task_id parsing more robust by:
+
+1. Trying multiple approaches to extract the profile_id:
+   - First attempt the standard format (research_profile_id_timestamp)
+   - If that fails, scan all parts of the task_id for valid profile IDs
+   - As a fallback, search for any profile with the given task_id as active_task_id
+
+2. Added better error handling:
+   - More specific error messages
+   - More helpful logging
+   - Better user feedback
+
+3. Added a fallback to cancel any active task for the profile:
+   - If the specified task_id doesn't match the active task, check if there's a different active task
+   - Cancel the different active task if present
+
+```python
+# New more robust parsing logic
+parts = task_id.split('_')
+profile_id = None
+
+# Try different format possibilities
+if len(parts) >= 2 and parts[0] == 'research':
+    try:
+        profile_id = int(parts[1])
+    except ValueError:
+        # If second part isn't a number, look for a number in all parts
+        for part in parts[1:]:
+            try:
+                candidate = int(part)
+                # Check if the candidate is a valid ID
+                if ResearchProfile.query.get(candidate):
+                    profile_id = candidate
+                    break
+            except ValueError:
+                continue
+
+# If profile_id not found, search by active_task_id
+if not profile_id:
+    profile = ResearchProfile.query.filter_by(active_task_id=task_id).first()
+    if profile:
+        profile_id = profile.id
+```
+
+This change makes the cancellation process much more robust and user-friendly, handling various edge cases gracefully.

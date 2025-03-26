@@ -102,22 +102,22 @@ class LazyScholar:
     
     def __init__(self, headless: bool = False, output_dir: str = "research_output", timeout: int = 120, search_suffix: str = "", max_pdfs_per_topic: int = 10, focus: str = "all", academic_format: bool = False, language: str = "en", site_tld: str = None, minimum_pdfs: int = 3, crawl_depth: int = 3, max_crawl_pages: int = 20, search_purpose: str = "academic", require_pdfs: bool = True, max_references_per_subtopic: int = 10, output_format: str = "md"):
         """
-        Initialize the LazyScholar instance.
+        Initialize the LazyScholar research assistant.
         
         Args:
-            headless (bool): Whether to run the browser in headless mode
-            output_dir (str): Directory to store research output
-            timeout (int): Timeout in seconds for browser operations
-            search_suffix (str): Suffix to append to search queries
-            max_pdfs_per_topic (int): Maximum number of PDFs to process per topic
-            focus (str): Type of content to focus on ('pdf', 'html', or 'all')
-            academic_format (bool): Whether to format the final paper as an academic paper
-            language (str): Language code for the final paper (e.g., 'en', 'tr', 'es')
-            site_tld (str): Top-level domain to restrict searches to (e.g., 'edu', 'gov', 'org')
-            minimum_pdfs (int): Minimum number of PDFs required for each subtopic before stopping search
-            crawl_depth (int): Maximum depth for website crawling (default: 3)
+            headless (bool): Whether to run the browser in headless mode (default: False)
+            output_dir (str): Directory to save research output (default: "research_output")
+            timeout (int): Timeout for browser operations in seconds (default: 120)
+            search_suffix (str): Additional text to append to search queries (default: "")
+            max_pdfs_per_topic (int): Maximum number of PDFs to download per topic (default: 10)
+            focus (str): Focus of the research ('all', 'papers', 'books', 'articles') (default: "all")
+            academic_format (bool): Whether to format output as academic paper (default: False)
+            language (str): Language code for search results (default: "en")
+            site_tld (str): TLD for search results (e.g., "edu", "org") (default: None)
+            minimum_pdfs (int): Minimum number of PDFs to find before proceeding (default: 3)
+            crawl_depth (int): Depth of web crawling for PDFs (default: 3)
             max_crawl_pages (int): Maximum number of pages to visit during crawling (default: 20)
-            search_purpose (str): Purpose of the search ('academic', 'practical', or 'travel')
+            search_purpose (str): Purpose of the search ('academic', 'news', 'practical', or 'travel')
             require_pdfs (bool): Whether PDFs are required for the search
             max_references_per_subtopic (int): Maximum number of references to collect per subtopic (default: 10)
             output_format (str): Format for the final output ('md', 'pdf', 'html', 'epub', etc.) (default: 'md')
@@ -329,7 +329,7 @@ class LazyScholar:
     
     def analyze_problem_statement(self, problem_statement: str) -> List[Dict[str, Any]]:
         """
-        Analyze the problem statement and generate topics and subtopics.
+        Analyze the problem statement and generate topics and subtopics using LLM.
         
         Args:
             problem_statement: The research problem statement
@@ -337,164 +337,58 @@ class LazyScholar:
         Returns:
             List of topics and subtopics
         """
-        logger.info("Analyzing problem statement...")
-        
-        # Use the specified search purpose or detect it from keywords if set to 'auto'
-        content_type = self.search_purpose
-        
-        if content_type == 'auto':
-            # Determine if this is a practical/how-to query or a travel query
-            is_practical = any(keyword in problem_statement.lower() for keyword in 
-                              ["how to", "guide", "tutorial", "steps", "instructions", "learn", "method"])
-            is_travel = any(keyword in problem_statement.lower() for keyword in 
-                           ["travel", "visit", "tourism", "vacation", "destination", "trip", "tour", "places"])
-            
-            if is_practical:
-                content_type = 'practical'
-            elif is_travel:
-                content_type = 'travel'
-            else:
-                content_type = 'academic'
-        
-        # Create a prompt based on the content type
-        if content_type == 'practical':
-            prompt = f"""
-            I need to create a comprehensive guide about: "{problem_statement}"
-            
-            Please analyze this topic and break it down into 3-5 main sections that would make a complete guide.
-            For each main section, provide 2-4 subsections that cover important aspects.
-            
-            Format your response as a JSON array with the following structure:
-            [
-                {{
-                    "title": "Main Section Title",
-                    "subtopics": [
-                        {{
-                            "title": "Subsection Title 1",
-                            "search_phrase": "Specific English search phrase with relevant keywords for this subtopic"
-                        }},
-                        {{
-                            "title": "Subsection Title 2",
-                            "search_phrase": "Specific English search phrase with relevant keywords for this subtopic"
-                        }}
-                    ]
-                }}
-            ]
-            
-            Make sure the sections flow logically and cover all important aspects of the topic.
-            
-            IMPORTANT: For each subtopic, create a specific search_phrase that:
-            1. Is ALWAYS in English, regardless of the original problem statement language
-            2. Contains 4-6 specific keywords relevant to that subtopic
-            3. Does NOT include the original problem statement text
-            4. Is optimized for search engines to find specific information
-            5. Is concise (5-8 words maximum)
-            
-            For example, if the topic is about "Hamburg travel guide", a good search phrase would be "Hamburg top attractions historical landmarks" rather than repeating the entire problem statement.
-            """
-        elif content_type == 'travel':
-            prompt = f"""
-            I need to create a comprehensive travel guide about: "{problem_statement}"
-            
-            Please analyze this destination/travel topic and break it down into 4-6 main sections that would make a complete travel guide.
-            For each main section, provide 2-4 subsections that cover important aspects.
-            
-            Format your response as a JSON array with the following structure:
-            [
-                {{
-                    "title": "Main Section Title",
-                    "subtopics": [
-                        {{
-                            "title": "Subsection Title 1",
-                            "search_phrase": "Specific English search phrase with relevant keywords for this subtopic"
-                        }},
-                        {{
-                            "title": "Subsection Title 2",
-                            "search_phrase": "Specific English search phrase with relevant keywords for this subtopic"
-                        }}
-                    ]
-                }}
-            ]
-            
-            Include sections like "Getting There", "Accommodation", "Top Attractions", "Local Cuisine", "Practical Tips", etc. as appropriate.
-            
-            IMPORTANT: For each subtopic, create a specific search_phrase that:
-            1. Is ALWAYS in English, regardless of the original problem statement language
-            2. Contains 4-6 specific keywords relevant to that subtopic
-            3. Does NOT include the original problem statement text
-            4. Is optimized for search engines to find specific information
-            5. Is concise (5-8 words maximum)
-            
-            For example, if the topic is about "Hamburg travel guide", a good search phrase would be "Hamburg top attractions historical landmarks" rather than repeating the entire problem statement.
-            """
-        else:
-            # Default academic research prompt
-            prompt = f"""
-            I need to write a comprehensive research paper about: "{problem_statement}"
-            
-            Please analyze this topic and break it down into 4-6 main sections that would make a complete academic paper.
-            For each main section, provide 2-4 subsections that cover important aspects.
-            
-            Format your response as a JSON array with the following structure:
-            [
-                {{
-                    "title": "Main Section Title",
-                    "subtopics": [
-                        {{
-                            "title": "Subsection Title 1",
-                            "search_phrase": "Specific English search phrase with relevant keywords for this subtopic"
-                        }},
-                        {{
-                            "title": "Subsection Title 2",
-                            "search_phrase": "Specific English search phrase with relevant keywords for this subtopic"
-                        }}
-                    ]
-                }}
-            ]
-            
-            Make sure the sections follow academic paper structure (e.g., Introduction, Literature Review, Methodology, Results, Discussion, Conclusion).
-            
-            IMPORTANT: For each subtopic, create a specific search_phrase that:
-            1. Is ALWAYS in English, regardless of the original problem statement language
-            2. Contains 4-6 specific keywords relevant to that subtopic
-            3. Does NOT include the original problem statement text
-            4. Is optimized for search engines to find specific information
-            5. Is concise (5-8 words maximum)
-            
-            For example, if the topic is about "Climate change impacts", a good search phrase would be "climate change economic impacts statistics" rather than repeating the entire problem statement.
-            """
+        logger.info("Analyzing problem statement with LLM...")
         
         try:
-            # Call the API with retry logic
+            # Construct the prompt for topic generation
+            prompt = f"""
+            Given this research problem: "{problem_statement}"
+            
+            Generate a comprehensive research outline with main topics and subtopics.
+            The outline should be thorough and academically structured.
+            
+            For each topic:
+            1. Create 3-5 subtopics that cover key aspects
+            2. Include a specific search phrase for each subtopic that will help find relevant academic sources
+            3. Ensure topics and subtopics are clearly focused and well-defined
+            
+            Format the response as a JSON array with this structure:
+            [
+                {{
+                    "title": "Main Topic Name",
+                    "subtopics": [
+                        {{
+                            "title": "Subtopic Name",
+                            "status": "pending",
+                            "search_phrase": "Specific search terms for this subtopic"
+                        }}
+                    ]
+                }}
+            ]
+            
+            Return ONLY the JSON array, no other text.
+            """
+            
+            # Get topics from LLM
             response = self._api_call_with_retry(
                 lambda: self.model.generate_content(prompt).text
             )
             
-            # Extract the JSON part from the response
-            json_str = self._extract_json_from_text(response)
-            
-            # Parse the JSON
-            topics = json.loads(json_str)
+            # Extract and parse JSON from response
+            topics_json = self._extract_json_from_text(response)
+            topics = json.loads(topics_json)
             
             # Validate the structure
             self._validate_topics_structure(topics)
             
-            # Add status field to each subtopic and ensure search_phrase is valid
+            # Ensure search phrases are in English and well-formatted
             for topic in topics:
                 for subtopic in topic["subtopics"]:
-                    subtopic["status"] = "pending"
-                    
-                    # Ensure search_phrase is in English and doesn't contain the original problem statement
-                    if "search_phrase" not in subtopic or not subtopic["search_phrase"]:
-                        # Generate a default search phrase if none exists
-                        subtopic["search_phrase"] = f"{topic['title']} {subtopic['title']}".replace("'", "").replace('"', '')
-                    
                     # Ensure the search phrase is in English
                     if not all(ord(c) < 128 for c in subtopic["search_phrase"]):
-                        # If non-ASCII characters are found, generate an English search phrase
                         logger.info(f"Converting non-English search phrase to English: {subtopic['search_phrase']}")
                         try:
-                            # Try to translate or generate an English search phrase
+                            # Generate an English search phrase
                             english_prompt = f"""
                             Translate this search phrase to English, keeping only the most important keywords (5-8 words maximum):
                             "{subtopic['search_phrase']}"
@@ -510,11 +404,12 @@ class LazyScholar:
                             # Fallback to a simple English phrase
                             subtopic["search_phrase"] = f"{topic['title']} {subtopic['title']}".replace("'", "").replace('"', '')
             
-            logger.info(f"Generated {len(topics)} topics with {sum(len(topic['subtopics']) for topic in topics)} subtopics")
+            logger.info(f"Generated {len(topics)} topics with {sum(len(topic['subtopics']) for topic in topics)} subtopics using LLM")
             return topics
+            
         except Exception as e:
-            logger.error(f"Error analyzing problem statement: {str(e)}")
-            # Generate default topics if analysis fails
+            logger.error(f"Error analyzing problem statement with LLM: {str(e)}")
+            logger.warning("Falling back to default topics...")
             return self._generate_default_topics(problem_statement)
     
     def _generate_default_topics(self, problem_statement: str) -> List[Dict[str, Any]]:
@@ -702,22 +597,51 @@ class LazyScholar:
     
     def update_topics_tracking_file(self) -> None:
         """
-        Create or update the topics_and_subtopics.md tracking file.
+        Create topics_and_subtopics.md tracking file if it doesn't exist.
+        If file already exists, load topics from it to update memory.
         """
-        logger.info("Updating topics and subtopics tracking file")
+        logger.info("Checking topics and subtopics tracking file")
         
         try:
             # Path to the tracking file
             tracking_file = os.path.join(self.output_dir, "topics_and_subtopics.md")
             
-            # Count total subtopics
-            total_subtopics = sum(len(topic["subtopics"]) for topic in self.topics)
+            # If file exists, load topics from it
+            if os.path.exists(tracking_file):
+                logger.info(f"Topics and subtopics file exists at {tracking_file}, loading topics from it")
+                loaded_topics = self.load_topics_from_md(tracking_file)
+                if loaded_topics:
+                    self.topics = loaded_topics
+                    logger.info("Successfully loaded topics from file into memory")
+                return
+                
+            # If file doesn't exist, create it with initial topics
+            markdown = self._generate_topics_markdown(self.topics)
+            with open(tracking_file, "w", encoding="utf-8") as f:
+                f.write(markdown)
+            logger.info(f"Created initial topics and subtopics tracking file: {tracking_file}")
             
-            # Get current date
-            current_date = datetime.now().strftime("%Y-%m-%d")
+        except Exception as e:
+            logger.error(f"Error handling topics and subtopics tracking file: {e}")
+    
+    def _generate_topics_markdown(self, topics: List[Dict[str, Any]]) -> str:
+        """
+        Generate markdown content for topics and subtopics.
+        
+        Args:
+            topics: List of topics with their subtopics
             
-            # Generate markdown content
-            markdown = f"""# LazyScholar Research Topics and Subtopics
+        Returns:
+            Markdown formatted string
+        """
+        # Count total subtopics
+        total_subtopics = sum(len(topic.get("subtopics", [])) for topic in topics)
+        
+        # Get current date
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Generate markdown content
+        markdown = f"""# LazyScholar Research Topics and Subtopics
 
 This file tracks the generated topics and subtopics for your academic research project.
 
@@ -725,23 +649,24 @@ This file tracks the generated topics and subtopics for your academic research p
 
 ### Research Topics
 """
-            
-            # Add topics
-            for topic in self.topics:
-                markdown += f"- {topic['title']}\n"
-            
-            markdown += "\n### Subtopics Status\n"
-            
-            # Add subtopics with checkboxes
-            for topic in self.topics:
-                markdown += f"\n#### {topic['title']}\n"
+        
+        # Add topics
+        for topic in topics:
+            markdown += f"- {topic['title']}\n"
+        
+        markdown += "\n### Subtopics Status\n"
+        
+        # Add subtopics with checkboxes
+        for topic in topics:
+            markdown += f"\n#### {topic['title']}\n"
+            if 'subtopics' in topic:
                 for subtopic in topic["subtopics"]:
                     markdown += f"- [ ] {subtopic}\n"
-            
-            markdown += f"""
+        
+        markdown += f"""
 ## Research Progress
 - Research initiated: {current_date}
-- Topics generated: {len(self.topics)}
+- Topics generated: {len(topics)}
 - Subtopics generated: {total_subtopics}
 - Completed subtopics: 0
 - In-progress subtopics: 0
@@ -749,15 +674,8 @@ This file tracks the generated topics and subtopics for your academic research p
 
 *Note: This file will be updated as research progresses. Checkboxes will be marked when subtopics are completed.*
 """
-            
-            # Write to file
-            with open(tracking_file, "w", encoding="utf-8") as f:
-                f.write(markdown)
-            
-            logger.info(f"Updated topics and subtopics tracking file: {tracking_file}")
-            
-        except Exception as e:
-            logger.error(f"Error updating topics and subtopics tracking file: {e}")
+        
+        return markdown
     
     def extract_web_content(self, html_path: str, topic: str, subtopic: str) -> Dict[str, Any]:
         """
@@ -1223,10 +1141,17 @@ This file tracks the generated topics and subtopics for your academic research p
         # Store the problem statement
         self.problem_statement = problem_statement
         
-        # Generate topics and subtopics
-        self.topics = self.analyze_problem_statement(problem_statement)
+        # Check if topics_and_subtopics.md exists
+        tracking_file = os.path.join(self.output_dir, "topics_and_subtopics.md")
+        if os.path.exists(tracking_file):
+            logger.info("Found existing topics_and_subtopics.md file, loading topics from it")
+            self.topics = self.load_topics_from_md(tracking_file)
+        else:
+            # Generate topics and subtopics only if file doesn't exist
+            logger.info("No existing topics file found, generating new topics")
+            self.topics = self.analyze_problem_statement(problem_statement)
         
-        # Update the topics tracking file
+        # Update the topics tracking file (this will now skip if file exists)
         self.update_topics_tracking_file()
         
         # Start the browser
@@ -1259,218 +1184,58 @@ This file tracks the generated topics and subtopics for your academic research p
                     # Use search_phrase for search if available, otherwise use the subtopic title
                     search_title = subtopic_data.get("search_phrase", subtopic_title)
                     
-                    # Ensure search_phrase is in English and doesn't contain the original problem statement
-                    if not search_title or not all(ord(c) < 128 for c in search_title):
-                        logger.warning(f"Invalid search phrase: {search_title}. Generating a new one.")
-                        search_title = f"{topic_title} {subtopic_title}".replace("'", "").replace('"', '')
-                        if not all(ord(c) < 128 for c in search_title):
-                            # If still contains non-ASCII characters, transliterate or remove them
-                            import unicodedata
-                            search_title = ''.join(
-                                c for c in unicodedata.normalize('NFKD', search_title)
-                                if unicodedata.category(c) != 'Mn'
-                            )
-                            # Replace any remaining non-ASCII characters with spaces
-                            search_title = ''.join(c if ord(c) < 128 else ' ' for c in search_title)
-                            search_title = ' '.join(search_title.split())  # Normalize spaces
-                            logger.info(f"Using search phrase for {topic_title} - {subtopic_title}: {search_title}")
+                    # Construct the search query
+                    search_query = f"{search_title}"
+                    if self.search_suffix:
+                        search_query += f" {self.search_suffix}"
                     
-                    # Search for sources related to the subtopic
-                    search_query = f"{search_title} {self.search_suffix}".strip()
-                    
-                    # Add site restriction if site_tld is specified and not already in the query
+                    # Add site restriction if site_tld is specified
                     if self.site_tld and f"site:{self.site_tld}" not in search_query.lower():
                         search_query += f" site:{self.site_tld}"
                     
-                    # Log the search query being used
-                    logger.info(f"Using search phrase for {topic_title} - {subtopic_title}: {search_query}")
+                    # Search for PDFs
+                    pdf_paths = self._search_for_pdfs(search_query, search_engine)
                     
-                    # Initialize content list
-                    pdf_contents = []
+                    # Process the PDFs
+                    self._process_pdfs_for_subtopic(pdf_paths, topic_title, subtopic_title)
                     
-                    # If we're prioritizing HTML content (require_pdfs is False)
-                    if not self.require_pdfs:
-                        logger.info("Prioritizing HTML content as 'Prioritize Document Files' is unchecked")
-                        logger.info("PDF search and usage is completely disabled")
-                        self._extract_html_content(search_query, pdf_contents, topic_title, subtopic_title, search_engine)
-                    else:
-                        # If we're prioritizing PDFs (require_pdfs is True)
-                        # Perform the search based on the search engine
-                        pdf_urls = self._search_for_pdfs(search_query, search_engine) or []
-                        
-                        # Get the list of PDFs in the pdfs directory
-                        pdf_dir = os.path.join(self.output_dir, "pdfs")
-                        if os.path.exists(pdf_dir):
-                            pdf_files = [os.path.join(pdf_dir, f) for f in os.listdir(pdf_dir) if f.endswith('.pdf')]
-                        
-                            # Sort by creation time (newest first)
-                            pdf_files.sort(key=lambda x: os.path.getctime(x), reverse=True)
-                        
-                            # Take only the most recent PDFs up to max_pdfs_per_topic
-                            recent_pdfs = pdf_files[:self.max_pdfs_per_topic]
-                            
-                            if recent_pdfs:
-                                logger.info(f"Processing {len(recent_pdfs)} recently downloaded PDFs")
-                                # Process all PDFs for this subtopic
-                                pdf_contents = self._process_pdfs_for_subtopic(recent_pdfs, topic_title, subtopic_title) or []
-                            else:
-                                logger.warning(f"PDF directory {pdf_dir} does not exist")
-                        
-                        # If we don't have enough content, try HTML pages
-                        if len(pdf_contents) < self.minimum_pdfs:
-                            # Only switch to HTML content if focus is not specifically set to 'pdf'
-                            if self.focus != 'pdf':
-                                logger.info(f"Not enough PDF content found ({len(pdf_contents)}), adding HTML content...")
-                                self._extract_html_content(search_query, pdf_contents, topic_title, subtopic_title, search_engine)
-                            else:
-                                logger.info(f"Not enough PDF content found ({len(pdf_contents)}), but focus is set to 'pdf' only. Skipping HTML content extraction.")
-                    
-                    # Create the subtopic directory and file
-                    topic_dir = os.path.join(self.output_dir, "topics", self._sanitize_filename(topic_title))
-                    ensure_directory(topic_dir)
-                    subtopic_file = os.path.join(topic_dir, f"{self._sanitize_filename(subtopic_title)}.md")
-                    
-                    # Only write the file if we have content
-                    if pdf_contents:
-                        try:
-                            # Write the subtopic file
-                            with open(subtopic_file, "w", encoding="utf-8") as f:
-                                # Write the title
-                                f.write(f"# {subtopic_title}\n\n")
-                                
-                                # Write the content
-                                for content in pdf_contents:
-                                    f.write(content["content"] + "\n\n")
-                                
-                                # Write the references
-                                f.write("## References\n\n")
-                                for content in pdf_contents:
-                                    source = content.get("source", "Unknown source")
-                                    f.write(f"- {source}\n")
-                            
-                            logger.info(f"QWrote subtopic file: {subtopic_file}")
-                        except Exception as e:
-                            logger.error(f"Error writing subtopic file: {str(e)}")
-                    else:
-                        # If we have no content after all retries, make one final attempt with a broader search
-                        logger.warning(f"No content found for {subtopic_title} after multiple attempts. Making final attempt.")
-                        
-                        # Try a very broad search with the topic name
-                        final_search_query = f"{topic_title} {subtopic_title} comprehensive information"
-                        final_contents = []
-                        
-                        # Try with a higher max_pdfs_per_topic value for this final attempt
-                        original_max = self.max_pdfs_per_topic
-                        self.max_pdfs_per_topic = max(20, original_max * 2)  # Double the max or use at least 20
-                        
-                        # Only extract HTML content if focus is not specifically set to 'pdf'
-                        if self.focus != 'pdf':
-                            # Make a final attempt with a broader search query
-                            self._extract_html_content(final_search_query, final_contents, topic_title, subtopic_title, search_engine)
-                        else:
-                            logger.info(f"No content found for {subtopic_title}, but focus is set to 'pdf' only. Skipping HTML content extraction in final attempt.")
-                        
-                        # Restore original max_pdfs_per_topic
-                        self.max_pdfs_per_topic = original_max
-                        
-                        if final_contents:
-                            # Write the file with the content from the final attempt
-                            try:
-                                with open(subtopic_file, "w", encoding="utf-8") as f:
-                                    f.write(f"# {subtopic_title}\n\n")
-                                    
-                                    for content in final_contents:
-                                        f.write(content["content"] + "\n\n")
-                                    
-                                    f.write("## References\n\n")
-                                    for content in final_contents:
-                                        source = content.get("source", "Unknown source")
-                                        f.write(f"- {source}\n")
-                                
-                                logger.info(f"Wrote subtopic file after final attempt: {subtopic_file}")
-                            except Exception as e:
-                                logger.error(f"Error writing subtopic file after final attempt: {str(e)}")
-                        else:
-                            logger.error(f"Failed to find any content for {subtopic_title} after all attempts.")
-                            # We don't write an empty file
-                    
-                    # Update subtopic with extracted content
-                    subtopic_data["pdf_contents"] = pdf_contents
-                    
-                    logger.info(f"Successfully processed {len(pdf_contents)} sources (PDFs and HTML) for the subtopic")
+                    # Update subtopic status
+                    subtopic_data["status"] = "completed"
             
             # Generate the final paper
             final_paper_path = self.generate_final_paper(self.topics)
             logger.info(f"Final paper generated at: {final_paper_path}")
             
-            # Check if we should format as academic paper
-            if self.academic_format:
-                logger.info("Formatting final paper as academic paper...")
-                try:
-                    # Import the academic_formatter module
-                    import academic_formatter
-                    
-                    # Initialize the model
-                    model = academic_formatter.initialize_model()
-                    if not model:
-                        logger.error("Failed to initialize model for academic formatting")
-                        return final_paper_path
-                    
-                    # Extract references and content
-                    pdf_references, content = academic_formatter.extract_references_from_final_paper(final_paper_path)
-                    
-                    # Format as academic paper
-                    formatted_paper = academic_formatter.format_as_academic_paper(model, content, pdf_references, self.language)
-                    
-                    # Save formatted paper
-                    output_path = academic_formatter.save_formatted_paper(final_paper_path, formatted_paper)
-                    
-                    if output_path:
-                        logger.info(f"Successfully formatted final paper as academic paper at {output_path}")
-                    else:
-                        logger.error("Failed to save formatted academic paper")
-                except Exception as e:
-                    logger.error(f"Error formatting final paper: {str(e)}")
-            
             return final_paper_path
+        
+        except Exception as e:
+            logger.error(f"Error during research: {str(e)}")
+            raise
         finally:
             # Close the browser
             self.close_browser()
     
     def _search_for_pdfs(self, query: str, search_engine: str) -> List[str]:
         """
-        Search for PDFs related to the query using the specified search engine.
+        Search for and download PDF files related to the query.
         
         Args:
             query: The search query
-            search_engine: The search engine URL
+            search_engine: The search engine URL to use
             
         Returns:
-            List of PDF URLs
+            List of paths to downloaded PDFs
         """
-        # Initialize pdf_urls at the beginning to ensure we always return a list
-        pdf_urls = []
-        # Initialize a list to store paths to downloaded PDFs
-        downloaded_pdfs = []
-        # Maximum number of pages to check
-        max_pages = 3
+        downloaded_pdfs = []  # Initialize the list to store downloaded PDF paths
+        pdf_urls = []  # Initialize the list to store found PDF URLs
+        max_pages = 5  # Maximum number of search result pages to check
         
         try:
-            if self.require_pdfs:
-                logger.info(f"Searching for PDFs with query: {query}")
-            else:
-                logger.info(f"Searching for web content with query: {query}")
-            logger.info(f"Using search engine: {search_engine}")
+            logger.info(f"Searching for PDFs with query: {query}")
             
-            # Ensure query includes site restriction if site_tld is specified
-            if self.site_tld and f"site:{self.site_tld}" not in query.lower():
-                query += f" site:{self.site_tld}"
-                logger.info(f"Added site restriction to query: {query}")
-            
-            # Ensure query includes filetype:pdf if we're looking for PDFs
-            if self.require_pdfs and "filetype:pdf" not in query.lower():
-                query += " filetype:pdf"
-                logger.info(f"Added PDF filetype restriction to query: {query}")
+            # Ensure query includes PDF requirement if not already present
+            if "filetype:pdf" not in query.lower():
+                query = f"{query} filetype:pdf"
             
             # For DuckDuckGo, use a direct search URL approach
             if "duckduckgo.com" in search_engine:
@@ -1488,7 +1253,6 @@ This file tracks the generated topics and subtopics for your academic research p
                             direct_search_url = f"https://duckduckgo.com/?q={encoded_query}&t=h_&ia=web"
                         else:
                             # For subsequent pages, add the page parameter
-                            # DuckDuckGo uses 's' parameter for pagination with a value of 30 for page 2, 60 for page 3, etc.
                             offset = (page_num - 1) * 30
                             direct_search_url = f"https://duckduckgo.com/?q={encoded_query}&t=h_&ia=web&s={offset}"
                         
@@ -1497,206 +1261,136 @@ This file tracks the generated topics and subtopics for your academic research p
                         # Navigate to the search URL
                         self.browser.get(direct_search_url)
                         
-                        # Wait for the page to load
-                        WebDriverWait(self.browser, self.timeout).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, "a"))
-                        )
-                        
-                        # Take a screenshot of the search results (only small screenshot instead of full page)
-                        screenshot_path = os.path.join(self.output_dir, f"search_results_page{page_num}.png")
-                        self.browser.save_screenshot(screenshot_path)
-                        logger.info(f"Search results page {page_num} screenshot saved")
-                        
-                        # Wait for the page to load
-                        time.sleep(3)
-                        
-                        # Store the search engine domain to avoid extracting content from it
-                        search_engine_domain = ""
+                        # Wait for the page to load with increased timeout
                         try:
-                            from urllib.parse import urlparse
-                            parsed_url = urlparse(self.browser.current_url)
-                            search_engine_domain = parsed_url.netloc
-                            logger.info(f"Search engine domain: {search_engine_domain}")
-                        except Exception as e:
-                            logger.warning(f"Error extracting search engine domain: {str(e)}")
+                            WebDriverWait(self.browser, 20).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, "article"))
+                            )
+                        except TimeoutException:
+                            logger.warning(f"Timeout waiting for search results on page {page_num}")
+                            continue
                         
-                        # Find all links
-                        links = self.browser.find_elements(By.CSS_SELECTOR, "a")
+                        # Take a screenshot for debugging
+                        screenshot_path = os.path.join(self.output_dir, f"duckduckgo_search_results_page{page_num}.png")
+                        self.browser.save_screenshot(screenshot_path)
+                        logger.info(f"DuckDuckGo search results page {page_num} screenshot saved to {screenshot_path}")
                         
-                        # First, look for direct PDF links
-                        for link in links:
-                            href = link.get_attribute("href")
-                            if href and href.lower().endswith(".pdf") and href not in pdf_urls:
-                                # Check if the URL matches the site_tld restriction if specified
-                                if self.site_tld and not self._url_matches_site_tld(href):
-                                    logger.info(f"Skipping PDF link that doesn't match site_tld: {href}")
+                        # Find all links using multiple selectors
+                        selectors = [
+                            "article a",  # Main result links
+                            ".result__body a",  # Alternative result links
+                            "a[href*='.pdf']",  # Direct PDF links
+                            ".result__url",  # URL-only links
+                            ".result__a"  # Another common result link class
+                        ]
+                        
+                        result_links = []
+                        for selector in selectors:
+                            try:
+                                elements = self.browser.find_elements(By.CSS_SELECTOR, selector)
+                                for element in elements:
+                                    href = element.get_attribute("href")
+                                    if href and href not in result_links:
+                                        result_links.append(href)
+                            except Exception as e:
+                                logger.debug(f"Error finding links with selector {selector}: {str(e)}")
+                                continue
+                        
+                        logger.info(f"Found {len(result_links)} links on page {page_num}")
+                        
+                        # Process each result link
+                        for url in result_links:
+                            if len(pdf_urls) >= self.max_pdfs_per_topic:
+                                break
+                                
+                            try:
+                                # Skip if URL is from DuckDuckGo or is JavaScript
+                                if "duckduckgo.com" in url or url.startswith("javascript:"):
                                     continue
-                                logger.info(f"Found direct PDF link on page {page_num}: {href}")
-                                pdf_urls.append(href)
-                                
-                                # Download the PDF immediately
-                                pdf_path = self._download_pdf(href)
-                                if pdf_path:
-                                    downloaded_pdfs.append(pdf_path)
-                                    logger.info(f"Successfully downloaded PDF: {pdf_path}")
-                                else:
-                                    logger.warning(f"Failed to download PDF: {href}")
-                                
-                                if len(pdf_urls) >= self.max_pdfs_per_topic:
-                                    break
-                        
-                        # If we don't have enough PDFs, try to find more by exploring result links
-                        if len(pdf_urls) < self.max_pdfs_per_topic:
-                            # Find result links - specifically target the search results
-                            result_links = self.browser.find_elements(By.CSS_SELECTOR, ".result__a")
-                            
-                            # If we can't find links with that selector, try a more general approach
-                            if not result_links:
-                                # Filter out DuckDuckGo links and already visited links
-                                result_links = []
-                                for link in links:
-                                    try:
-                                        href = link.get_attribute("href")
-                                        if href and "duckduckgo.com" not in href and not href.startswith("javascript:") and href not in result_links:
-                                            # Check if the URL matches the site_tld restriction if specified
-                                            if self.site_tld and not self._url_matches_site_tld(href):
-                                                continue
-                                            result_links.append(href)
-                                    except:
-                                        continue
-                            else:
-                                # Convert elements to URLs
-                                result_links = [link.get_attribute("href") for link in result_links 
-                                               if link.get_attribute("href") and "duckduckgo.com" not in link.get_attribute("href")
-                                               and (not self.site_tld or self._url_matches_site_tld(link.get_attribute("href")))]
-                            
-                            # Limit to top 10 results per page
-                            result_links = result_links[:10]
-                            logger.info(f"Found {len(result_links)} result links on page {page_num} to check for PDFs")
-                            
-                            # Visit each result link and look for PDFs
-                            for i, url in enumerate(result_links):
-                                if len(pdf_urls) >= self.max_pdfs_per_topic:
-                                    break
                                     
-                                try:
-                                    logger.info(f"Checking result {i+1}/{len(result_links)} on page {page_num}: {url}")
-                                    
-                                    # Open in a new tab
-                                    original_window = self.browser.current_window_handle
-                                    self.browser.execute_script("window.open('');")
-                                    self.browser.switch_to.window(self.browser.window_handles[1])
-                                    
-                                    # Navigate to the URL
-                                    self.browser.get(url)
-                                    time.sleep(3)
-                                    
-                                    # Look for PDF links on the page
-                                    page_pdf_links = self.browser.find_elements(By.XPATH, "//a[contains(@href, '.pdf')]")
-                                    for pdf_link in page_pdf_links:
-                                        pdf_href = pdf_link.get_attribute("href")
-                                        if pdf_href and ".pdf" in pdf_href and pdf_href not in pdf_urls:
-                                            # Check if the PDF URL matches the site_tld restriction if specified
-                                            if self.site_tld and not self._url_matches_site_tld(pdf_href):
-                                                logger.info(f"Skipping PDF link that doesn't match site_tld: {pdf_href}")
-                                                continue
-                                            logger.info(f"Found PDF on result page from page {page_num}: {pdf_href}")
-                                            pdf_urls.append(pdf_href)
+                                # Check if it's a direct PDF link
+                                if url.lower().endswith('.pdf'):
+                                    if url not in pdf_urls:
+                                        logger.info(f"Found direct PDF link: {url}")
+                                        pdf_urls.append(url)
+                                        
+                                        # Download the PDF
+                                        pdf_path = self._download_pdf(url)
+                                        if pdf_path:
+                                            downloaded_pdfs.append(pdf_path)
+                                            logger.info(f"Successfully downloaded PDF: {pdf_path}")
+                                    else:
+                                        # Visit the link to look for PDFs
+                                        logger.info(f"Checking page for PDFs: {url}")
+                                        
+                                        # Open in a new tab
+                                        original_window = self.browser.current_window_handle
+                                        self.browser.execute_script("window.open('');")
+                                        self.browser.switch_to.window(self.browser.window_handles[-1])
+                                        
+                                        try:
+                                            # Navigate to the URL with timeout
+                                            self.browser.set_page_load_timeout(10)
+                                            self.browser.get(url)
                                             
-                                            # Download the PDF immediately
-                                            pdf_path = self._download_pdf(pdf_href)
-                                            if pdf_path:
-                                                downloaded_pdfs.append(pdf_path)
-                                                logger.info(f"Successfully downloaded PDF: {pdf_path}")
-                                            else:
-                                                logger.warning(f"Failed to download PDF: {pdf_href}")
+                                            # Look for PDF links with multiple methods
+                                            pdf_selectors = [
+                                                "a[href$='.pdf']",  # Links ending with .pdf
+                                                "a[href*='.pdf']",  # Links containing .pdf
+                                                "a[download]",  # Download links
+                                                "a[type='application/pdf']"  # Links with PDF type
+                                            ]
                                             
-                                            if len(pdf_urls) >= self.max_pdfs_per_topic:
-                                                break
-                                    
-                                    # Close the tab and switch back
-                                    self.browser.close()
-                                    self.browser.switch_to.window(original_window)
-                                except Exception as e:
-                                    logger.error(f"Error checking result page {url} from page {page_num}: {str(e)}")
-                                    # Try to close the tab and switch back if there was an error
-                                    try:
-                                        self.browser.close()
-                                        self.browser.switch_to.window(original_window)
-                                    except:
-                                        pass
+                                            for selector in pdf_selectors:
+                                                pdf_elements = self.browser.find_elements(By.CSS_SELECTOR, selector)
+                                                for element in pdf_elements:
+                                                    pdf_url = element.get_attribute("href")
+                                                    if pdf_url and pdf_url not in pdf_urls:
+                                                        logger.info(f"Found PDF link on page: {pdf_url}")
+                                                        pdf_urls.append(pdf_url)
+                                                        
+                                                        # Download the PDF
+                                                        pdf_path = self._download_pdf(pdf_url)
+                                                        if pdf_path:
+                                                            downloaded_pdfs.append(pdf_path)
+                                                            logger.info(f"Successfully downloaded PDF: {pdf_path}")
+                                                            
+                                                        if len(pdf_urls) >= self.max_pdfs_per_topic:
+                                                            break
+                                                            
+                                        except Exception as e:
+                                            logger.warning(f"Error checking page {url}: {str(e)}")
+                                        
+                                        finally:
+                                            # Close the tab and switch back
+                                            try:
+                                                self.browser.close()
+                                                self.browser.switch_to.window(original_window)
+                                            except:
+                                                pass
+                            
+                            except Exception as e:
+                                logger.error(f"Error processing URL {url}: {str(e)}")
+                                continue
                         
                         # Check if we need to continue to the next page
                         if len(pdf_urls) >= self.max_pdfs_per_topic:
-                            logger.info(f"Found enough PDFs ({len(pdf_urls)}), stopping search at page {page_num}")
+                            logger.info(f"Found enough PDFs ({len(pdf_urls)}), stopping search")
                             break
                         
-                        # If this is the last page we're checking, log it
-                        if page_num == max_pages:
-                            logger.info(f"Reached maximum number of pages to check ({max_pages})")
+                        # Add a small delay between pages
+                        time.sleep(2)
                         
                     except Exception as e:
                         logger.error(f"Error with DuckDuckGo search on page {page_num}: {str(e)}")
-                        # Continue to the next page even if there was an error
                         continue
-            else:
-                # For other search engines, use the provided URL directly
-                try:
-                    logger.info(f"Navigating directly to search URL: {search_engine}")
-                    self.browser.get(search_engine)
-                    
-                    # Wait for the page to load
-                    WebDriverWait(self.browser, self.timeout).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "a"))
-                    )
-                    
-                    # Take a screenshot of the search results (only small screenshot instead of full page)
-                    screenshot_path = os.path.join(self.output_dir, "search_results.png")
-                    self.browser.save_screenshot(screenshot_path)
-                    
-                    # Find all links
-                    links = self.browser.find_elements(By.CSS_SELECTOR, "a")
-                    
-                    # Look for PDF links
-                    for link in links:
-                        href = link.get_attribute("href")
-                        if href and href.lower().endswith(".pdf") and href not in pdf_urls:
-                            # Check if the URL matches the site_tld restriction if specified
-                            if self.site_tld and not self._url_matches_site_tld(href):
-                                logger.info(f"Skipping PDF link that doesn't match site_tld: {href}")
-                                continue
-                            logger.info(f"Found direct PDF link: {href}")
-                            pdf_urls.append(href)
-                            
-                            # Download the PDF immediately
-                            pdf_path = self._download_pdf(href)
-                            if pdf_path:
-                                downloaded_pdfs.append(pdf_path)
-                                logger.info(f"Successfully downloaded PDF: {pdf_path}")
-                            else:
-                                logger.warning(f"Failed to download PDF: {href}")
-                            
-                            if len(pdf_urls) >= self.max_pdfs_per_topic:
-                                break
-                except Exception as e:
-                    logger.error(f"Error with direct search URL: {str(e)}")
             
-            # Final limit check
-            pdf_urls = pdf_urls[:self.max_pdfs_per_topic]
-            logger.info(f"Final count: Found {len(pdf_urls)} PDF links and downloaded {len(downloaded_pdfs)} PDFs")
+            logger.info(f"Search completed. Found {len(pdf_urls)} PDF URLs, downloaded {len(downloaded_pdfs)} PDFs")
+            return downloaded_pdfs
             
         except Exception as e:
-            logger.error(f"Error searching for PDFs: {str(e)}")
-            # Take a screenshot for debugging
-            try:
-                screenshot_path = os.path.join(self.output_dir, "search_error.png")
-                self.browser.save_screenshot(screenshot_path)
-                logger.info(f"Error screenshot saved to {screenshot_path}")
-            except:
-                pass
-        
-        # Return the list of PDF URLs (the downloaded paths are stored in the downloaded_pdfs list)
-        return pdf_urls
+            logger.error(f"Error during PDF search: {str(e)}")
+            return downloaded_pdfs
     
     def _download_pdf(self, url: str) -> str:
         """
@@ -1960,7 +1654,8 @@ This file tracks the generated topics and subtopics for your academic research p
                 IMPORTANT: Your response will be directly inserted into a markdown document. DO NOT include any meta-commentary, suggestions, or notes about the content. DO NOT start with phrases like "Here's the extracted information" or "Based on the document". Just provide the actual content.
                 
                 Document text:
-                {text[:10000]}
+                {text}
+
                 """
             elif content_type == "travel":
                 prompt = f"""
@@ -1977,7 +1672,8 @@ This file tracks the generated topics and subtopics for your academic research p
                 IMPORTANT: Your response will be directly inserted into a markdown document. DO NOT include any meta-commentary, suggestions, or notes about the content. DO NOT start with phrases like "Here's the extracted information" or "Based on the document". Just provide the actual content.
                 
                 Document text:
-                {text[:10000]}
+                {text}
+                #Karakter sınırlaması
                 """
             else:
                 prompt = f"""
@@ -1995,7 +1691,7 @@ This file tracks the generated topics and subtopics for your academic research p
                 IMPORTANT: Your response will be directly inserted into a markdown document. DO NOT include any meta-commentary, suggestions, or notes about the content. DO NOT start with phrases like "Here's the extracted information" or "Based on the document". Just provide the actual content.
                 
                 Document text:
-                {text[:10000]}
+                {text}
             """
             
             # Generate content using the Gemini model
@@ -2334,29 +2030,37 @@ This file tracks the generated topics and subtopics for your academic research p
             current_topic = None
             
             for line in content.split('\n'):
-                if line.startswith('## '):
+                if line.startswith('#### '):
                     # This is a topic
                     if current_topic:
                         topics.append(current_topic)
                     
-                    topic_title = line[3:].strip()
+                    topic_title = line[5:].strip()
                     current_topic = {
                         "title": topic_title,
                         "subtopics": []
                     }
-                elif line.startswith('- ') and current_topic:
+                elif line.startswith('- [ ]') and current_topic:
                     # This is a subtopic
-                    subtopic_title = line[2:].strip()
-                    current_topic["subtopics"].append({
-                        "title": subtopic_title,
-                        "status": "completed"
-                    })
+                    try:
+                        subtopic_data = eval(line[5:].strip())
+                        if isinstance(subtopic_data, dict):
+                            current_topic["subtopics"].append(subtopic_data)
+                    except:
+                        # If eval fails, just use the text as title
+                        subtopic_title = line[5:].strip()
+                        current_topic["subtopics"].append({
+                            "title": subtopic_title,
+                            "status": "pending"
+                        })
             
             # Add the last topic
             if current_topic:
                 topics.append(current_topic)
             
+            logger.info(f"Successfully loaded {len(topics)} topics from {file_path}")
             return topics
+            
         except Exception as e:
             logger.error(f"Error loading topics from markdown file: {str(e)}")
             return []
@@ -2991,6 +2695,7 @@ This file tracks the generated topics and subtopics for your academic research p
         2. The result MUST be in {self.language} language. Translate all content into {self.language} language except commonly used international words.
         3. you can merge the repetative information and make it more concise and coherent.
         4. Do not use your own words to explain the content, just use the information provided in the content.
+        5. Don't add the irrevelant parts of the content. Every information in the content should be relevant to the topic and subtopic.
         Here is the content:
         
         {original_content}
@@ -3096,8 +2801,8 @@ def parse_arguments():
         "--search-purpose",
         type=str,
         default="academic",
-        choices=["academic", "practical", "travel"],
-        help="Purpose of the search (default: academic). Options: academic, practical, travel"
+        choices=["academic", "news", "practical", "travel"],
+        help="Purpose of the search (default: academic). Options: academic, news, practical, travel"
     )
     
     parser.add_argument(

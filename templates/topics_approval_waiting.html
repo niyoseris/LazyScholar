@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Waiting for Topics Generation - LazyScholar{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Generating Topics and Subtopics</h1>
+        <div>
+            <a href="{{ url_for('view_profile', profile_id=profile.id) }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Profile
+            </a>
+        </div>
+    </div>
+
+    <div class="alert alert-info">
+        <i class="fas fa-info-circle"></i> LazyScholar is generating topics and subtopics based on your problem statement. This might take a moment. The page will refresh automatically when they're ready for your review.
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Research: {{ profile.name }}</h5>
+        </div>
+        <div class="card-body">
+            <p><strong>Problem Statement:</strong> {{ profile.problem_statement }}</p>
+            
+            <div class="progress mb-3">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" 
+                     style="width: {{ progress.progress }}%;" 
+                     aria-valuenow="{{ progress.progress }}" aria-valuemin="0" aria-valuemax="100">
+                    {{ progress.progress }}%
+                </div>
+            </div>
+            
+            <p><strong>Current Status:</strong> <span class="badge bg-info">{{ progress.status|capitalize }}</span></p>
+            <p><strong>Current Step:</strong> {{ progress.current_step }}</p>
+            
+            <!-- Cancel Research Button -->
+            <form action="{{ url_for('cancel_research', task_id=task_id) }}" method="POST" class="mt-3" id="cancelForm">
+                <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to cancel this research? This action cannot be undone.')">
+                    <i class="fas fa-times-circle"></i> Cancel Research
+                </button>
+            </form>
+        </div>
+    </div>
+    
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Processing</h5>
+        </div>
+        <div class="card-body text-center p-5">
+            <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <h4 id="status-message">Analyzing problem statement...</h4>
+            <p class="text-muted">This may take a few moments. The page will refresh automatically.</p>
+        </div>
+    </div>
+    
+    <div class="card mt-4">
+        <div class="card-header">
+            <h5 class="mb-0">Recent Messages</h5>
+        </div>
+        <div class="card-body">
+            <div class="messages-container" style="max-height: 300px; overflow-y: auto;">
+                {% for message in progress.messages|reverse %}
+                <div class="message">
+                    <small class="text-muted">{{ message.time }}</small>
+                    <p class="mb-2">{{ message.text }}</p>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Check for file existence and refresh when ready
+    function setupEventSource() {
+        const eventSource = new EventSource("{{ url_for('stream_progress', task_id=task_id) }}");
+        
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            // Update progress bar
+            const progressBar = document.querySelector('.progress-bar');
+            progressBar.style.width = data.progress + '%';
+            progressBar.setAttribute('aria-valuenow', data.progress);
+            progressBar.textContent = data.progress + '%';
+            
+            // Update status message
+            document.getElementById('status-message').textContent = data.current_step;
+            
+            // Update status badge
+            const statusBadge = document.querySelector('.badge');
+            statusBadge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            
+            // Update messages
+            const messagesContainer = document.querySelector('.messages-container');
+            let messagesHtml = '';
+            
+            data.messages.slice().reverse().forEach(message => {
+                messagesHtml += `
+                    <div class="message">
+                        <small class="text-muted">${message.time}</small>
+                        <p class="mb-2">${message.text}</p>
+                    </div>
+                `;
+            });
+            
+            messagesContainer.innerHTML = messagesHtml;
+            
+            // If topics file is ready or status is no longer initializing, refresh
+            if (data.progress >= 20 || data.status !== 'initializing') {
+                location.reload();
+            }
+        };
+        
+        eventSource.onerror = function() {
+            console.error("EventSource failed. Reconnecting...");
+            eventSource.close();
+            setTimeout(setupEventSource, 5000);
+        };
+    }
+    
+    // Check if file exists periodically (every 3 seconds)
+    function checkFileExists() {
+        fetch(location.href)
+            .then(response => {
+                if (response.redirected || response.url !== location.href) {
+                    // If we got redirected, it means the file exists now
+                    location.reload();
+                }
+            })
+            .catch(error => console.error("Error checking file:", error));
+    }
+    
+    // Start event source and periodic checks when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        setupEventSource();
+        setInterval(checkFileExists, 3000);
+    });
+</script>
+{% endblock %} 

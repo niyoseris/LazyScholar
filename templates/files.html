@@ -43,6 +43,14 @@
                                                target="_blank">
                                                 <i class="fas fa-eye me-1"></i>View
                                             </a>
+                                            
+                                            {% if file.name == 'topics_and_subtopics.md' %}
+                                            <a href="{{ url_for('topics_editor', profile_id=profile.id) }}" 
+                                               class="btn btn-sm btn-outline-success">
+                                                <i class="fas fa-edit me-1"></i>Edit Topics
+                                            </a>
+                                            {% endif %}
+                                            
                                             <a href="{{ url_for('view_file', profile_id=profile.id, filepath=file.path) }}" 
                                                class="btn btn-sm btn-outline-secondary"
                                                download>

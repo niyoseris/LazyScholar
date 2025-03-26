@@ -126,7 +126,7 @@ class ResearchProgress:
 def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=True, 
                 language='en', search_suffix=None, headless=True, site_tld=None,
                 minimum_pdfs=3, crawl_depth=3, max_crawl_pages=20, search_purpose='academic',
-                require_pdfs=True, task_id=None, search_engine=None, output_format='md'):
+                require_pdfs=True, task_id=None, search_engine=None, output_format='md', progress=None):
     """
     Wrapper function for LazyScholar to handle research process
     
@@ -147,14 +147,17 @@ def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=Tru
         task_id (str): Unique identifier for tracking progress
         search_engine (str): Search engine URL to use for research
         output_format (str): Format for the final paper ('md', 'pdf', 'html', 'epub', etc.)
+        progress (ResearchProgress): Progress tracker instance, if provided
         
     Returns:
         bool: True if research completed successfully, False otherwise
     """
     # Create or get progress tracker
-    if not task_id:
-        task_id = str(uuid.uuid4())
-    progress = ResearchProgress.get_instance(task_id)
+    if not progress:
+        if not task_id:
+            task_id = str(uuid.uuid4())
+        progress = ResearchProgress.get_instance(task_id)
+    
     progress.update(status="running", progress=5, current_step="Initializing research", 
                    message=f"Starting research on: {problem_statement}")
     
@@ -531,7 +534,15 @@ def run_research(problem_statement, output_dir, max_pdfs=10, academic_format=Tru
                 progress.update(status="failed", current_step="Research failed", 
                               message="Research process did not complete successfully")
             
-        return result
+            # Mark research as complete
+            progress.update(progress=100, current_step="Complete", 
+                          message="Research process completed successfully")
+            
+            # Clear active task ID 
+            profile.active_task_id = None
+            db.session.commit()
+            
+            return result
         
     except Exception as e:
         logger.error(f"Error during research: {str(e)}")
@@ -597,6 +608,7 @@ class ResearchProfile(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     active_task_id = db.Column(db.String(100), nullable=True)  # Store the active research task ID
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    topics_and_subtopics = db.Column(db.Text)  # Store topics and subtopics as markdown
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -695,14 +707,34 @@ def view_profile(profile_id):
     progress_steps = []
     final_paper = None
     final_paper_preview = None
+    topics_file_exists = False
     
     # Check if research has started
     if os.path.exists(output_dir):
-        # Load topics and subtopics
-        topics_file = os.path.join(output_dir, 'topics.json')
-        if os.path.exists(topics_file):
-            with open(topics_file, 'r') as f:
-                topics = json.load(f)
+        # Check if topics_and_subtopics.md exists
+        topics_md_file = os.path.join(output_dir, 'topics_and_subtopics.md')
+        if os.path.exists(topics_md_file):
+            topics_file_exists = True
+            
+            # Parse topics from the markdown file if available
+            with open(topics_md_file, 'r', encoding='utf-8') as f:
+                topics_md_content = f.read()
+                topics_data = parse_topics_file(topics_md_content)
+                
+                # Convert the parsed data to the format expected by the template
+                for topic in topics_data:
+                    topics.append({
+                        'name': topic['title'],
+                        'subtopics': topic['subtopics']
+                    })
+                
+        # Try loading topics.json as a fallback
+        if not topics and os.path.exists(os.path.join(output_dir, 'topics.json')):
+            try:
+                with open(os.path.join(output_dir, 'topics.json'), 'r') as f:
+                    topics = json.load(f)
+            except:
+                pass
         
         # Get PDF files
         pdf_dir = os.path.join(output_dir, 'pdfs')
@@ -748,82 +780,518 @@ def view_profile(profile_id):
                            final_paper=final_paper, 
                            final_paper_preview=final_paper_preview,
                            task_id=task_id,
+                           topics_file_exists=topics_file_exists,
                            research_in_progress=research_in_progress)
 
 @app.route('/research/start/<int:profile_id>')
 @login_required
 def start_research(profile_id):
+    """Start a new research task for the given profile"""
     profile = ResearchProfile.query.get_or_404(profile_id)
+    
+    # Check if the profile belongs to the current user
     if profile.user_id != current_user.id:
+        flash("You don't have permission to access this profile", "danger")
         return redirect(url_for('dashboard'))
     
-    # Prepare output directory
-    output_dir = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id), str(profile_id))
+    # Check if there's already an active task
+    if profile.active_task_id:
+        # Get the progress of the task
+        progress = ResearchProgress.get_instance(profile.active_task_id)
+        
+        # If the task is still running, redirect to the progress page
+        if progress.status == 'running':
+            flash("This profile already has a research task in progress", "info")
+            return redirect(url_for('view_profile', profile_id=profile_id))
     
-    # Generate a unique task ID
+    # Create a unique task ID
     task_id = f"research_{profile_id}_{int(time.time())}"
     
-    # Store the task ID in the profile
+    # Create the output directory
+    output_dir = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id), str(profile_id))
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Update the profile with the task ID
     profile.active_task_id = task_id
     db.session.commit()
     
-    # Initialize progress tracker
-    progress = ResearchProgress.get_instance(task_id)
-    progress.update(status="initializing", progress=0, 
-                   current_step="Preparing research", 
-                   message=f"Initializing research for: {profile.name}")
+    # Start the research task in a background thread with proper app context
+    from flask import copy_current_request_context
     
-    # Start research in a background thread
-    def run_research_task(profile_instance, profile_id, task_id):
-        try:
-            # Use the wrapper function to run research
-            result = run_research(
-                problem_statement=profile_instance.problem_statement,
-                output_dir=output_dir,
-                max_pdfs=profile_instance.max_pdfs_per_topic,
-                academic_format=profile_instance.academic_format,
-                language=profile_instance.language,
-                search_suffix=profile_instance.search_suffix,
-                headless=True,
-                site_tld=profile_instance.site_tld,
-                minimum_pdfs=profile_instance.minimum_pdfs,
-                crawl_depth=profile_instance.crawl_depth,
-                max_crawl_pages=profile_instance.max_crawl_pages,
-                search_purpose=profile_instance.search_purpose,
-                require_pdfs=profile_instance.require_pdfs,
-                task_id=task_id,
-                search_engine=profile_instance.search_url,  # Pass the search URL from the profile
-                output_format=profile_instance.output_format
-            )
-            
-            # Clear the active task ID if the research is complete
-            if result:
-                with app.app_context():
-                    updated_profile = ResearchProfile.query.get(profile_id)
-                    if updated_profile and updated_profile.active_task_id == task_id:
-                        updated_profile.active_task_id = None
-                        db.session.commit()
-                        
-        except Exception as e:
-            app.logger.error(f"Research error for profile {profile_id}: {str(e)}")
-            progress = ResearchProgress.get_instance(task_id)
-            progress.update(status="failed", current_step="Error occurred", 
-                           message=f"Unhandled error: {str(e)}")
-            
-            # Clear the active task ID on error
-            with app.app_context():
-                updated_profile = ResearchProfile.query.get(profile_id)
-                if updated_profile and updated_profile.active_task_id == task_id:
-                    updated_profile.active_task_id = None
-                    db.session.commit()
+    @copy_current_request_context
+    def run_research_with_context(profile_id, task_id):
+        return run_research_task(profile_id, task_id)
     
-    # Start the thread with the profile instance
-    thread = threading.Thread(target=run_research_task, args=(profile, profile_id, task_id))
+    # Create and start the thread
+    thread = threading.Thread(target=run_research_with_context, args=(profile_id, task_id))
     thread.daemon = True
     thread.start()
     
-    flash('Research started. You can view the progress on this page.')
-    return redirect(url_for('view_profile', profile_id=profile_id, task_id=task_id))
+    # Redirect to the topics editor for approval after generation
+    return redirect(url_for('topics_approval', profile_id=profile_id, task_id=task_id))
+
+@app.route('/research/<int:profile_id>/topics-approval/<task_id>')
+@login_required
+def topics_approval(profile_id, task_id):
+    """Show the topics and subtopics for user approval before continuing research"""
+    profile = ResearchProfile.query.get_or_404(profile_id)
+    
+    # Check if the profile belongs to the current user
+    if profile.user_id != current_user.id:
+        flash("You don't have permission to access this profile", "danger")
+        return redirect(url_for('dashboard'))
+    
+    # Check if the task_id matches the profile's active task
+    if profile.active_task_id != task_id:
+        flash("Invalid task ID", "danger")
+        return redirect(url_for('view_profile', profile_id=profile_id))
+    
+    # Get the progress of the task
+    progress = ResearchProgress.get_instance(task_id)
+    
+    # Get the path to the topics_and_subtopics.md file
+    research_dir = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id), str(profile_id))
+    filepath = "topics_and_subtopics.md"
+    full_filepath = os.path.join(research_dir, filepath)
+    
+    # Check if the file exists yet
+    if not os.path.exists(full_filepath):
+        # File doesn't exist yet, show waiting page
+        return render_template('topics_approval_waiting.html', 
+                              profile=profile,
+                              task_id=task_id,
+                              progress=progress.to_dict())
+    
+    # Read the file content
+    with open(full_filepath, 'r', encoding='utf-8') as file:
+        content = file.read()
+    
+    # Parse the content to extract topics and subtopics
+    topics_data = parse_topics_file(content)
+    
+    # Show the topics approval page
+    return render_template('topics_approval.html', 
+                          profile=profile,
+                          task_id=task_id,
+                          topics_data=topics_data,
+                          original_content=content,
+                          progress=progress.to_dict())
+
+@app.route('/research/<int:profile_id>/approve-topics/<task_id>', methods=['POST'])
+@login_required
+def approve_topics(profile_id, task_id):
+    """Approve the topics and subtopics and continue with the research"""
+    profile = ResearchProfile.query.get_or_404(profile_id)
+    
+    # Check if the profile belongs to the current user
+    if profile.user_id != current_user.id:
+        flash("You don't have permission to access this profile", "danger")
+        return redirect(url_for('dashboard'))
+    
+    # Check if the task_id matches the profile's active task
+    if profile.active_task_id != task_id:
+        flash("Invalid task ID", "danger")
+        return redirect(url_for('view_profile', profile_id=profile_id))
+    
+    # Get the progress tracker
+    progress = ResearchProgress.get_instance(task_id)
+    
+    # Check if it's in waiting status
+    if progress.status != 'waiting':
+        flash("This task is not waiting for approval", "warning")
+        return redirect(url_for('view_profile', profile_id=profile_id))
+    
+    # Resume the research process by updating the status
+    progress.update(status="running", current_step="Topics approved", 
+                   message="Topics and subtopics approved by user, continuing research")
+    
+    # Redirect to the profile view page to show progress
+    flash("Topics and subtopics approved. Research is continuing...", "success")
+    return redirect(url_for('view_profile', profile_id=profile_id))
+
+def run_research_task(profile_id, task_id=None):
+    """Background task to run research for a profile"""
+    with app.app_context():
+        try:
+            # Get the research profile
+            profile = ResearchProfile.query.get(profile_id)
+            
+            if not profile:
+                logger.error(f"Research profile {profile_id} not found")
+                return False
+                
+            # Setup task_id if not provided
+            if not task_id:
+                task_id = f"research_{profile_id}_{int(time.time())}"
+                profile.active_task_id = task_id
+                db.session.commit()
+                
+            # Setup progress tracking
+            progress = ResearchProgress.get_instance(task_id)
+            progress.update(progress=10, current_step="Initialization", message="Starting research process")
+                
+            # Prepare output directory
+            output_dir = os.path.join(app.config['UPLOAD_FOLDER'], str(profile.user_id), str(profile_id))
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Check if topics_and_subtopics.md exists
+            topics_file = os.path.join(output_dir, "topics_and_subtopics.md")
+            topics_exist = os.path.exists(topics_file)
+            
+            # Prepare search query
+            search_query = profile.problem_statement.strip()
+            if profile.search_suffix:
+                search_query = f"{search_query} {profile.search_suffix}"
+                
+            # Research settings
+            max_pdfs = profile.max_pdfs_per_topic
+            require_pdfs = profile.require_pdfs
+            academic_format = profile.academic_format
+            language = profile.language
+                
+            # Initialize LazyScholar to generate topics
+            progress.update(progress=20, current_step="Initializing LazyScholar", 
+                           message="Setting up research environment")
+            
+            # Create a LazyScholar instance but don't start the browser yet
+            scholar = LazyScholar(
+                headless=True,
+                output_dir=output_dir,
+                max_pdfs_per_topic=max_pdfs,
+                focus='pdf' if require_pdfs else 'all',
+                academic_format=academic_format,
+                language=language,
+                site_tld=profile.site_tld,
+                minimum_pdfs=profile.minimum_pdfs,
+                crawl_depth=profile.crawl_depth,
+                max_crawl_pages=profile.max_crawl_pages,
+                search_purpose=profile.search_purpose,
+                require_pdfs=require_pdfs,
+                output_format=profile.output_format
+            )
+            
+            # Only generate topics if they don't exist
+            if not topics_exist:
+                progress.update(progress=25, current_step="Analyzing problem statement", 
+                              message="Generating topics and subtopics...")
+                scholar.problem_statement = search_query
+                scholar.topics = scholar.analyze_problem_statement(search_query)
+                
+                # Create the topics_and_subtopics.md file
+                scholar.update_topics_tracking_file()
+                
+                # Save topics and subtopics to profile
+                if os.path.exists(topics_file):
+                    with open(topics_file, 'r') as f:
+                        profile.topics_and_subtopics = f.read()
+                        db.session.commit()
+            else:
+                # Load existing topics from the file
+                progress.update(progress=25, current_step="Loading existing topics", 
+                              message="Using existing topics and subtopics...")
+                try:
+                    with open(topics_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        topics_data = parse_topics_file(content)
+                        scholar.topics = topics_data
+                        scholar.problem_statement = search_query
+                except Exception as e:
+                    logger.error(f"Error loading existing topics: {str(e)}")
+                    return False
+            
+            # Update status to waiting for user approval
+            progress.update(status="waiting", progress=30, 
+                           current_step="Waiting for user approval", 
+                           message="Topics and subtopics are ready. Please review and approve to continue.")
+            
+            # Wait for user approval or cancellation
+            while progress.status == "waiting" and not progress.is_cancelled():
+                time.sleep(2)
+                
+                # Refresh progress from database (in case it was updated elsewhere)
+                if progress.is_cancelled():
+                    logger.info(f"Research task {task_id} was cancelled")
+                    profile.active_task_id = None
+                    db.session.commit()
+                    return False
+            
+            # Check if the task was cancelled during waiting
+            if progress.is_cancelled():
+                logger.info(f"Research task {task_id} was cancelled")
+                profile.active_task_id = None
+                db.session.commit()
+                return False
+            
+            # If we're here, the user has approved the topics
+            progress.update(status="running", progress=35, 
+                           current_step="Starting research with approved topics", 
+                           message="Topics and subtopics approved. Starting research...")
+                
+            # Continue with the research process
+            result = run_research(
+                problem_statement=search_query,
+                output_dir=output_dir,
+                max_pdfs=max_pdfs,
+                require_pdfs=require_pdfs,
+                academic_format=academic_format,
+                language=language,
+                progress=progress,
+                task_id=task_id,
+                search_engine=profile.search_url,
+                site_tld=profile.site_tld,
+                minimum_pdfs=profile.minimum_pdfs,
+                crawl_depth=profile.crawl_depth,
+                max_crawl_pages=profile.max_crawl_pages,
+                search_purpose=profile.search_purpose,
+                output_format=profile.output_format
+            )
+            
+            # Mark research as complete
+            progress.update(progress=100, current_step="Complete", 
+                          message="Research process completed successfully")
+            
+            # Clear active task ID 
+            profile.active_task_id = None
+            db.session.commit()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during research task: {str(e)}")
+            try:
+                # Check if we can still access the profile and clear the active task ID
+                profile = ResearchProfile.query.get(profile_id)
+                if profile:
+                    profile.active_task_id = None
+                    db.session.commit()
+            except Exception as inner_e:
+                logger.error(f"Error clearing task ID: {str(inner_e)}")
+                
+            # Update progress with error
+            if 'progress' in locals():
+                progress.update(progress=0, current_step="Error", 
+                              message=f"Research process failed: {str(e)}")
+                
+            return False
+
+@app.route('/files/<int:profile_id>/topics_editor', methods=['GET', 'POST'])
+@login_required
+def topics_editor(profile_id):
+    profile = ResearchProfile.query.get_or_404(profile_id)
+    
+    # Check if the profile belongs to the current user
+    if profile.user_id != current_user.id:
+        flash("You don't have permission to access this profile", "danger")
+        return redirect(url_for('dashboard'))
+    
+    # Get the full path to the topics_and_subtopics.md file
+    research_dir = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id), str(profile_id))
+    filepath = "topics_and_subtopics.md"
+    full_filepath = os.path.join(research_dir, filepath)
+    
+    # If the file doesn't exist yet, show a message
+    if not os.path.exists(full_filepath):
+        flash("The topics and subtopics file hasn't been generated yet. Start a research to generate it.", "info")
+        return redirect(url_for('view_profile', profile_id=profile_id))
+    
+    # Read the file content
+    with open(full_filepath, 'r', encoding='utf-8') as file:
+        content = file.read()
+    
+    # Parse the content to extract topics and subtopics
+    topics_data = parse_topics_file(content)
+    
+    if request.method == 'POST':
+        # Handle the form submission for editing topics and subtopics
+        action = request.form.get('action')
+        
+        if action == 'update':
+            # Get the updated topics and subtopics from the form
+            updated_data = json.loads(request.form.get('topics_data'))
+            # Generate new markdown content
+            new_content = generate_topics_md(updated_data, profile.problem_statement)
+            # Write the new content to the file
+            with open(full_filepath, 'w', encoding='utf-8') as file:
+                file.write(new_content)
+            
+            # Update the profile with the content
+            profile.topics_and_subtopics = new_content
+            db.session.commit()
+            
+            flash("Topics and subtopics updated successfully", "success")
+            
+            # Check if this is a "Save and Approve" action
+            if request.form.get('approve') == 'true':
+                # If there's an active task, update its status to approve it
+                if profile.active_task_id:
+                    progress = ResearchProgress.get_instance(profile.active_task_id)
+                    if progress.status == 'waiting':
+                        # Update progress to resume the research process
+                        progress.update(status="running", current_step="Topics approved", 
+                                       message="Topics and subtopics approved by user, continuing research")
+                        flash("Research is continuing with the updated topics and subtopics", "success")
+                        return redirect(url_for('view_profile', profile_id=profile_id))
+                    else:
+                        # Start a new research if there's no waiting task
+                        return redirect(url_for('start_research', profile_id=profile_id))
+                else:
+                    # If no active task, start a new research
+                    return redirect(url_for('start_research', profile_id=profile_id))
+            
+            # If research is not in progress, update the LazyScholar topics file
+            if not profile.active_task_id or not ResearchProgress.get_instance(profile.active_task_id).status == 'running':
+                # This is important for the LazyScholar to use the updated topics
+                logger.info("Updating LazyScholar topics file after user edit")
+                
+                # If there's an active task, try to update its progress
+                if profile.active_task_id:
+                    progress = ResearchProgress.get_instance(profile.active_task_id)
+                    progress.update(message="Topics and subtopics updated by user")
+        
+        elif action == 'add_topic':
+            topic_title = request.form.get('topic_title')
+            if topic_title and topic_title.strip():
+                topics_data.append({"title": topic_title.strip(), "subtopics": []})
+                new_content = generate_topics_md(topics_data, profile.problem_statement)
+                with open(full_filepath, 'w', encoding='utf-8') as file:
+                    file.write(new_content)
+                flash(f"New topic '{topic_title}' added", "success")
+            else:
+                flash("Topic title cannot be empty", "danger")
+        
+        elif action == 'delete_topic':
+            topic_index = int(request.form.get('topic_index'))
+            if 0 <= topic_index < len(topics_data):
+                deleted_topic = topics_data.pop(topic_index)
+                new_content = generate_topics_md(topics_data, profile.problem_statement)
+                with open(full_filepath, 'w', encoding='utf-8') as file:
+                    file.write(new_content)
+                flash(f"Topic '{deleted_topic['title']}' deleted", "success")
+        
+        elif action == 'add_subtopic':
+            topic_index = int(request.form.get('topic_index'))
+            subtopic_title = request.form.get('subtopic_title')
+            if 0 <= topic_index < len(topics_data) and subtopic_title and subtopic_title.strip():
+                topics_data[topic_index]['subtopics'].append(subtopic_title.strip())
+                new_content = generate_topics_md(topics_data, profile.problem_statement)
+                with open(full_filepath, 'w', encoding='utf-8') as file:
+                    file.write(new_content)
+                flash(f"New subtopic added to '{topics_data[topic_index]['title']}'", "success")
+            else:
+                flash("Invalid topic index or empty subtopic title", "danger")
+        
+        elif action == 'delete_subtopic':
+            topic_index = int(request.form.get('topic_index'))
+            subtopic_index = int(request.form.get('subtopic_index'))
+            if (0 <= topic_index < len(topics_data) and 
+                0 <= subtopic_index < len(topics_data[topic_index]['subtopics'])):
+                deleted_subtopic = topics_data[topic_index]['subtopics'].pop(subtopic_index)
+                new_content = generate_topics_md(topics_data, profile.problem_statement)
+                with open(full_filepath, 'w', encoding='utf-8') as file:
+                    file.write(new_content)
+                flash(f"Subtopic '{deleted_subtopic}' deleted", "success")
+            else:
+                flash("Invalid topic or subtopic index", "danger")
+        
+        elif action == 'approve':
+            # Mark the file as approved and proceed with research
+            return redirect(url_for('list_files', profile_id=profile_id))
+        
+        # Redirect to reload the page with updated data
+        return redirect(url_for('topics_editor', profile_id=profile_id))
+    
+    return render_template('topics_editor.html', 
+                          profile=profile,
+                          topics_data=topics_data,
+                          original_content=content)
+
+def parse_topics_file(content):
+    """Parse the topics_and_subtopics.md file content to extract topics and subtopics."""
+    topics_data = []
+    current_topic = None
+    
+    # Extract topics section
+    topics_match = re.search(r'### Research Topics\s+((?:-.*\n)+)', content)
+    subtopics_match = re.search(r'### Subtopics Status\s+(.*?)(?=\n## Research Progress|\Z)', content, re.DOTALL)
+    
+    if topics_match:
+        # Extract topics
+        topics_section = topics_match.group(1)
+        topic_items = re.findall(r'- (.*)\n', topics_section)
+        
+        for topic in topic_items:
+            topics_data.append({"title": topic, "subtopics": []})
+    
+    if subtopics_match:
+        # Extract subtopics
+        subtopics_section = subtopics_match.group(1)
+        topic_sections = re.split(r'\n#### ', subtopics_section)
+        
+        for section in topic_sections:
+            if not section.strip():
+                continue
+            
+            lines = section.strip().split('\n')
+            if lines:
+                topic_title = lines[0]
+                
+                # Find the matching topic in our data
+                topic_index = next((i for i, t in enumerate(topics_data) if t['title'] == topic_title), None)
+                
+                if topic_index is not None:
+                    # Extract subtopics for this topic
+                    for line in lines[1:]:
+                        subtopic_match = re.match(r'- \[([ x])\] (.*)', line)
+                        if subtopic_match:
+                            # Add subtopic
+                            topics_data[topic_index]['subtopics'].append(subtopic_match.group(2))
+    
+    return topics_data
+
+def generate_topics_md(topics_data, problem_statement):
+    """Generate the topics_and_subtopics.md file content from the topics data."""
+    
+    # Count total subtopics
+    total_subtopics = sum(len(topic["subtopics"]) for topic in topics_data)
+    
+    # Get current date
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    
+    # Generate markdown content
+    markdown = f"""# LazyScholar Research Topics and Subtopics
+
+This file tracks the generated topics and subtopics for your academic research project.
+
+## Current Research Status
+
+### Research Topics
+"""
+    
+    # Add topics
+    for topic in topics_data:
+        markdown += f"- {topic['title']}\n"
+    
+    markdown += "\n### Subtopics Status\n"
+    
+    # Add subtopics with checkboxes
+    for topic in topics_data:
+        markdown += f"\n#### {topic['title']}\n"
+        for subtopic in topic["subtopics"]:
+            markdown += f"- [ ] {subtopic}\n"
+    
+    markdown += f"""
+## Research Progress
+- Research initiated: {current_date}
+- Topics generated: {len(topics_data)}
+- Subtopics generated: {total_subtopics}
+- Completed subtopics: 0
+- In-progress subtopics: 0
+- Remaining subtopics: {total_subtopics}
+
+*Note: This file will be updated as research progresses. Checkboxes will be marked when subtopics are completed.*
+"""
+    
+    return markdown
 
 @app.route('/files/<int:profile_id>')
 @login_required
@@ -1138,56 +1606,20 @@ def translate_file(profile_id):
         flash(f"Error translating file: {str(e)}", "danger")
         return redirect(url_for('list_files', profile_id=profile_id))
 
-@app.route('/research/cancel/<task_id>', methods=['POST'])
-@login_required
-def cancel_research(task_id):
-    """Cancel a running research task"""
-    # Get the progress instance
-    progress = ResearchProgress.get_instance(task_id)
-    
-    # Validate ownership (extract profile_id from task_id)
-    try:
-        # Typical task_id format: research_profile_id_timestamp
-        parts = task_id.split('_')
-        if len(parts) >= 2 and parts[0] == 'research':
-            profile_id = int(parts[1])
-            profile = ResearchProfile.query.get_or_404(profile_id)
-            
-            # Check if the profile belongs to the current user
-            if profile.user_id != current_user.id:
-                flash("You don't have permission to cancel this research task", "danger")
-                return redirect(url_for('dashboard'))
-                
-            # Clear the active task ID from the profile
-            if profile.active_task_id == task_id:
-                profile.active_task_id = None
-                db.session.commit()
-        else:
-            flash("Invalid task ID format", "danger")
-            return redirect(url_for('dashboard'))
-    except Exception as e:
-        logger.error(f"Error validating ownership of task {task_id}: {str(e)}")
-        flash("Could not validate task ownership", "danger")
-        return redirect(url_for('dashboard'))
-    
-    # Cancel the task
-    progress.cancel()
-    
-    flash("Research task cancelled. The task will stop soon.", "info")
-    
-    # Redirect back to profile view
-    return redirect(url_for('view_profile', profile_id=profile_id, task_id=task_id))
-
 @app.route('/research/check-status/<int:profile_id>')
 @login_required
 def check_research_status(profile_id):
     """Check if the active_task_id is still valid and clear it if not"""
-    profile = ResearchProfile.query.get_or_404(profile_id)
+    profile = ResearchProfile.query.get(profile_id)
+    
+    if not profile:
+        flash("Profile not found.", "danger")
+        return redirect(url_for('dashboard'))
     
     # Check if the profile belongs to the current user
     if profile.user_id != current_user.id:
         return redirect(url_for('dashboard'))
-    
+        
     # Check if there's an active task
     if profile.active_task_id:
         progress = ResearchProgress.get_instance(profile.active_task_id)
@@ -1198,6 +1630,88 @@ def check_research_status(profile_id):
             db.session.commit()
             flash("Research task status has been updated.", "info")
     
+    return redirect(url_for('view_profile', profile_id=profile_id))
+
+@app.route('/research/cancel/<task_id>', methods=['POST'])
+@login_required
+def cancel_research(task_id):
+    """Cancel a running research task"""
+    # Get the progress instance
+    progress = ResearchProgress.get_instance(task_id)
+    
+    try:
+        # Önce profile_id'yi task_id'den çıkarmaya çalış
+        # Tipik task_id formatı: research_profile_id_timestamp
+        parts = task_id.split('_')
+        profile_id = None
+        
+        # Farklı format olasılıklarını kontrol et
+        if len(parts) >= 2 and parts[0] == 'research':
+            try:
+                profile_id = int(parts[1])
+            except ValueError:
+                # İkinci parça sayı değilse, tüm parçalarda sayı ara
+                for part in parts[1:]:
+                    try:
+                        candidate = int(part)
+                        # Aday bir ID mi diye kontrol et
+                        if ResearchProfile.query.get(candidate):
+                            profile_id = candidate
+                            break
+                    except ValueError:
+                        continue
+        
+        # Eğer profile_id bulunamadıysa, active_task_id'ye göre tüm profiller içinde ara
+        if not profile_id:
+            profile = ResearchProfile.query.filter_by(active_task_id=task_id).first()
+            if profile:
+                profile_id = profile.id
+        
+        if not profile_id:
+            flash("Could not determine which research profile to cancel", "danger")
+            return redirect(url_for('dashboard'))
+            
+        # Profile'ı kontrol et
+        profile = ResearchProfile.query.get(profile_id)
+        if not profile:
+            flash("Research profile not found", "danger")
+            return redirect(url_for('dashboard'))
+            
+        # Kullanıcı yetkisini kontrol et
+        if profile.user_id != current_user.id:
+            flash("You don't have permission to cancel this research task", "danger")
+            return redirect(url_for('dashboard'))
+            
+        # Active task ID'yi kontrol et
+        if profile.active_task_id == task_id:
+            # Önce görevi iptal et
+            progress.cancel()
+            logger.info(f"Cancelling research task {task_id} for profile {profile_id}")
+            
+            # Ardından active task ID'yi temizle
+            profile.active_task_id = None
+            db.session.commit()
+            
+            flash("Research task cancelled. The task will stop soon.", "info")
+        else:
+            # Task ID eşleşmiyorsa, profile'ın aktif görevi var mı kontrol et
+            if profile.active_task_id:
+                # Aktif görev farklıysa, onu iptal et
+                active_progress = ResearchProgress.get_instance(profile.active_task_id)
+                active_progress.cancel()
+                logger.info(f"Cancelling different active task {profile.active_task_id} for profile {profile_id}")
+                
+                profile.active_task_id = None
+                db.session.commit()
+                
+                flash("A different active research task was found and cancelled.", "info")
+            
+    except Exception as e:
+        logger.error(f"Error cancelling task {task_id}: {str(e)}")
+        flash(f"Error while cancelling the research: {str(e)}", "danger")
+        return redirect(url_for('dashboard'))
+    
+    # Redirect back to profile view
     return redirect(url_for('view_profile', profile_id=profile_id))
 
 if __name__ == '__main__':

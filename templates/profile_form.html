@@ -150,8 +150,9 @@
                                 <label for="search_purpose" class="form-label">Search Purpose</label>
                                 <select class="form-select" id="search_purpose" name="search_purpose">
                                     <option value="academic" {% if profile and profile.search_purpose == 'academic' %}selected{% endif %}>Academic Research</option>
-                                    <option value="practical" {% if profile and profile.search_purpose == 'practical' %}selected{% endif %}>How-to Guide</option>
+                                    <option value="news" {% if profile and profile.search_purpose == 'news' %}selected{% endif %}>Recent News</option>
                                     <option value="travel" {% if profile and profile.search_purpose == 'travel' %}selected{% endif %}>Travel Guide</option>
+                                    <option value="web" {% if profile and profile.search_purpose == 'web' %}selected{% endif %}>General Web Search</option>
                                 </select>
                                 <div class="form-text">Choose the purpose of your search to get better results</div>
                             </div>
