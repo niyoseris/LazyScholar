@@ -348,7 +348,7 @@ class LazyScholar:
             The outline should be thorough and academically structured.
             
             For each topic:
-            1. Create 3-5 subtopics that cover key aspects
+            1. Create subtopics that cover key aspects
             2. Include a specific search phrase for each subtopic that will help find relevant academic sources
             3. Ensure topics and subtopics are clearly focused and well-defined
             
@@ -816,7 +816,7 @@ This file tracks the generated topics and subtopics for your academic research p
         1. Summarize the key findings and insights from all topics
         2. Connect the main themes across different sections
         3. Provide final thoughts and significance of the research
-        4. Be approximately 500-700 words in length
+        4. Write at least 500-700 words in length
         5. Be written in {self.language} language
         6. Use a formal academic tone
         7. Be formatted in markdown with the title "# Conclusion"
@@ -2051,7 +2051,8 @@ This file tracks the generated topics and subtopics for your academic research p
                         subtopic_title = line[5:].strip()
                         current_topic["subtopics"].append({
                             "title": subtopic_title,
-                            "status": "pending"
+                            "status": "pending",
+                            "search_phrase": f"{current_topic['title']} {subtopic_title}"
                         })
             
             # Add the last topic
@@ -2532,12 +2533,14 @@ This file tracks the generated topics and subtopics for your academic research p
                         3. Format as a well-structured academic section
                         4. Your response will be directly inserted into a markdown document
                         5. DO NOT include any meta-commentary, suggestions, or notes about the content
-                        6. DO NOT start with phrases like "Here's the extracted information" or "Based on the webpage"
+                        6. DO NOT start with phrases like "Here's the extracted information" or "Based on the webpage", "a resarch shows" etc.
                         7. If there is NO relevant information, respond with ONLY: "No relevant information found on this webpage."
+                        8. Do not summarize the findings, just provide the information.
+                        9. Do not add any other text or phrases like "Here is the information" or "Based on the webpage" etc.
                         {'' if self.language == 'en' else f'8. Ensure the text is in {self.language} language'}
                         
                         Web page content:
-                        {main_content[:10000]}
+                        {main_content}
                         """
                         
                         # Generate content using the Gemini model
@@ -2696,6 +2699,8 @@ This file tracks the generated topics and subtopics for your academic research p
         3. you can merge the repetative information and make it more concise and coherent.
         4. Do not use your own words to explain the content, just use the information provided in the content.
         5. Don't add the irrevelant parts of the content. Every information in the content should be relevant to the topic and subtopic.
+        6. Do not add any other text or phrases like "Here is the information" or "Based on the webpage" etc.
+        7. Do not summarize the findings, just provide the information.
         Here is the content:
         
         {original_content}

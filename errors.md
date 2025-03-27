@@ -257,6 +257,49 @@ Error during research: 'LazyScholar' object has no attribute 'process_topic'
    - **Cause**: The translation feature was accepting free-form text input for target language and using a mapping system to guess the language code.
    - **Fix**: Updated the UI to use standardized language code dropdowns matching the academic_formatter's language parameter approach, ensuring consistency throughout the application.
 
+## Search Phrase Loading Issue
+
+**Error Message:**
+```
+Search phrase for topics and subtopics not working, using title instead
+```
+
+**Problem Description:**
+When topics and subtopics were loaded from the existing topics_and_subtopics.md file, the search_phrase field was missing in the fallback case. This caused the system to use the subtopic title for searching instead of the more specific search phrase.
+
+**Impact:**
+- Searches were less effective because they used generic titles instead of specific search phrases
+- The quality of research results was reduced due to less targeted searches
+- Users might get less relevant PDF files for their research topics
+
+**Cause:**
+In the `load_topics_from_md` method, when parsing failed for a subtopic line, it created a subtopic dictionary with only "title" and "status" keys, but no "search_phrase" key. Then, in the `conduct_research` method, the code would fall back to using the subtopic title when no search_phrase was found.
+
+**Solution:**
+Updated the fallback case in the `load_topics_from_md` method to include a "search_phrase" field:
+
+```python
+# Old code
+current_topic["subtopics"].append({
+    "title": subtopic_title,
+    "status": "pending"
+})
+
+# New code
+current_topic["subtopics"].append({
+    "title": subtopic_title,
+    "status": "pending",
+    "search_phrase": f"{current_topic['title']} {subtopic_title}"
+})
+```
+
+This ensures that all subtopics have a search_phrase, either from the original data or created as a fallback, which improves search relevance.
+
+**Prevention:**
+- Ensure that all essential fields are included in fallback cases when parsing data
+- Add validation for required fields when loading data structures
+- Consider using a schema validation approach for data structures loaded from files
+
 # LazyScholar Research Application Error Log
 
 ## Browser and Search Engine Errors
