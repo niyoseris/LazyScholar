@@ -274,12 +274,6 @@ class LazyScholar:
             if self.headless:
                 chrome_options.add_argument("--headless")
             
-            # Create a unique user data directory
-            import tempfile
-            import os
-            user_data_dir = tempfile.mkdtemp()
-            chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-            
             # Add other Chrome options
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
@@ -292,9 +286,6 @@ class LazyScholar:
             self.browser = webdriver.Chrome(options=chrome_options)
             self.browser.set_page_load_timeout(self.timeout)
             
-            # Store the user data directory for cleanup
-            self._user_data_dir = user_data_dir
-            
             # Set window size
             self.browser.set_window_size(1920, 1080)
             
@@ -303,47 +294,38 @@ class LazyScholar:
             logger.error(f"Failed to start browser: {str(e)}", exc_info=True)
             if "chromedriver" in str(e).lower():
                 logger.error("ChromeDriver error. Make sure Chrome is installed and updated.")
-            # Clean up the temporary directory if browser initialization fails
-            if hasattr(self, '_user_data_dir') and os.path.exists(self._user_data_dir):
-                import shutil
-                shutil.rmtree(self._user_data_dir, ignore_errors=True)
             raise
     
     def close_browser(self) -> None:
         """
         Close the browser session and clean up resources.
         """
-        if hasattr(self, 'browser') and self.browser:
+        if self.driver:
             try:
                 logger.info("Closing browser session")
                 
                 # First try the standard quit method
                 try:
-                    self.browser.quit()
+                    self.driver.quit()
                 except Exception as e:
                     logger.warning(f"Error during standard browser quit: {e}")
                     
                     # If standard quit fails, try to close all windows
                     try:
-                        for window_handle in self.browser.window_handles:
-                            self.browser.switch_to.window(window_handle)
-                            self.browser.close()
+                        for window_handle in self.driver.window_handles:
+                            self.driver.switch_to.window(window_handle)
+                            self.driver.close()
                     except Exception as e2:
                         logger.warning(f"Error closing browser windows: {e2}")
                 
-                # Clean up the user data directory
-                if hasattr(self, '_user_data_dir') and os.path.exists(self._user_data_dir):
-                    import shutil
-                    shutil.rmtree(self._user_data_dir, ignore_errors=True)
-                
                 # Set browser to None to indicate it's closed
-                self.browser = None
+                self.driver = None
                 logger.info("Browser session closed successfully")
                 
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
                 # Force set to None even if there was an error
-                self.browser = None
+                self.driver = None
     
     def analyze_problem_statement(self, problem_statement: str) -> List[Dict[str, Any]]:
         """
