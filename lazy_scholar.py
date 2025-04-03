@@ -30,6 +30,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from io import BytesIO, StringIO
 import random
+import shutil
 
 # Import required libraries
 import google.generativeai as genai
@@ -100,7 +101,7 @@ def ensure_directory(directory_path: str) -> str:
 class LazyScholar:
     """Main class for the LazyScholar application."""
     
-    def __init__(self, headless: bool = False, output_dir: str = "research_output", timeout: int = 120, search_suffix: str = "", max_pdfs_per_topic: int = 10, focus: str = "all", academic_format: bool = False, language: str = "en", site_tld: str = None, minimum_pdfs: int = 3, crawl_depth: int = 3, max_crawl_pages: int = 20, search_purpose: str = "academic", require_pdfs: bool = True, max_references_per_subtopic: int = 10, output_format: str = "md"):
+    def __init__(self, headless: bool = False, output_dir: str = "research_output", timeout: int = 120, search_suffix: str = "", max_pdfs_per_topic: int = 10, focus: str = "all", academic_format: bool = False, language: str = "en", site_tld: str = None, minimum_pdfs: int = 3, crawl_depth: int = 3, max_crawl_pages: int = 20, search_purpose: str = "academic", require_pdfs: bool = True, max_references_per_subtopic: int = 10, output_format: str = "md", optimize_final_paper: bool = True):
         """
         Initialize the LazyScholar research assistant.
         
@@ -117,10 +118,11 @@ class LazyScholar:
             minimum_pdfs (int): Minimum number of PDFs to find before proceeding (default: 3)
             crawl_depth (int): Depth of web crawling for PDFs (default: 3)
             max_crawl_pages (int): Maximum number of pages to visit during crawling (default: 20)
-            search_purpose (str): Purpose of the search ('academic', 'news', 'practical', or 'travel')
+            search_purpose (str): Purpose of the search ('academic', 'news', 'practical', 'travel', or 'general') (default: 'academic')
             require_pdfs (bool): Whether PDFs are required for the search
             max_references_per_subtopic (int): Maximum number of references to collect per subtopic (default: 10)
             output_format (str): Format for the final output ('md', 'pdf', 'html', 'epub', etc.) (default: 'md')
+            optimize_final_paper (bool): Whether to optimize the final paper with LLM (default: True)
         """
         # Import required modules
         import google.generativeai as genai
@@ -144,6 +146,7 @@ class LazyScholar:
         self.require_pdfs = require_pdfs
         self.output_format = output_format
         self.max_references_per_subtopic = max_references_per_subtopic
+        self.optimize_final_paper = optimize_final_paper
         self.browser = None
         self.topics = []
         self.problem_statement = ""
@@ -212,7 +215,7 @@ class LazyScholar:
             
             # Initialize the model for final paper generation
             self.gemini = genai.GenerativeModel(
-                model_name="gemini-2.0-flash-exp",
+                model_name="gemini-2.0-flash-thinking-exp-01-21",
                 generation_config=generation_config
             )
             
@@ -225,7 +228,7 @@ class LazyScholar:
             logger.error(f"Error initializing Gemini models: {str(e)}")
             raise
     
-    def _api_call_with_retry(self, api_func, max_retries=5, retry_delay=2):
+    def _api_call_with_retry(self, api_func, max_retries=5, retry_delay=3):
         """
         Make an API call with retry logic.
         
@@ -243,9 +246,20 @@ class LazyScholar:
                 return api_func()
             except Exception as e:
                 retries += 1
+                error_msg = str(e)
+                
+                # Check if it's a timeout or deadline exceeded error (504)
+                if "504" in error_msg or "deadline exceeded" in error_msg.lower() or "timeout" in error_msg.lower():
+                    # For timeout errors, use a much longer delay
+                    current_delay = retry_delay * (3 ** retries)  # Use exponential backoff with base 3
+                    current_delay = min(current_delay, 300)  # Cap at 5 minutes
+                    
+                    logger.warning(f"Timeout error (504). Waiting for {current_delay} seconds before retry {retries}/{max_retries}")
+                    time.sleep(current_delay)
+                    continue  # Continue immediately to next attempt
                 
                 # Check if it's a rate limit error (429)
-                if "429" in str(e) or "Resource has been exhausted" in str(e) or "quota" in str(e).lower():
+                if "429" in error_msg or "Resource has been exhausted" in error_msg or "quota" in error_msg.lower():
                     # For rate limit errors, use a longer delay
                     current_delay = retry_delay * (2 ** retries)  # Exponential backoff
                     current_delay = min(current_delay, 60)  # Cap at 60 seconds
@@ -255,10 +269,10 @@ class LazyScholar:
                 else:
                     # For other errors, use standard backoff
                     if retries >= max_retries:
-                        logger.error(f"API call failed after {max_retries} retries: {str(e)}")
+                        logger.error(f"API call failed after {max_retries} retries: {error_msg}")
                         raise
                     
-                    logger.warning(f"API call failed: {str(e)}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})")
+                    logger.warning(f"API call failed: {error_msg}. Retrying in {retry_delay} seconds... (Attempt {retries}/{max_retries})")
                     time.sleep(retry_delay)
                     retry_delay = min(retry_delay * 2, 30)  # Exponential backoff, capped at 30 seconds
         
@@ -532,6 +546,114 @@ class LazyScholar:
                          "search_phrase": f"{problem_statement} safety security health tips travel advice precautions"},
                         {"title": "Cultural Tips", "status": "pending",
                          "search_phrase": f"{problem_statement} cultural customs etiquette traditions local behavior tips"}
+                    ]
+                }
+            ]
+        elif self.search_purpose == 'news':
+            # Default topics for news content
+            return [
+                {
+                    "title": "Latest Developments",
+                    "subtopics": [
+                        {"title": f"Recent Updates on {problem_statement}", "status": "pending",
+                         "search_phrase": f"{problem_statement} latest recent updates news developments current"},
+                        {"title": "Breaking News", "status": "pending",
+                         "search_phrase": f"{problem_statement} breaking news latest headlines current events"},
+                        {"title": "Timeline of Events", "status": "pending",
+                         "search_phrase": f"{problem_statement} timeline chronology sequence of events history"}
+                    ]
+                },
+                {
+                    "title": "Key Figures and Stakeholders",
+                    "subtopics": [
+                        {"title": "Main Actors", "status": "pending",
+                         "search_phrase": f"{problem_statement} key players main actors figures people involved"},
+                        {"title": "Official Statements", "status": "pending",
+                         "search_phrase": f"{problem_statement} official statements announcements press releases"}
+                    ]
+                },
+                {
+                    "title": "Analysis and Impact",
+                    "subtopics": [
+                        {"title": "Expert Analysis", "status": "pending",
+                         "search_phrase": f"{problem_statement} expert analysis commentary opinions insights"},
+                        {"title": "Social and Economic Impact", "status": "pending",
+                         "search_phrase": f"{problem_statement} impact effects consequences implications social economic"},
+                        {"title": "Public Reaction", "status": "pending",
+                         "search_phrase": f"{problem_statement} public reaction response sentiment social media"}
+                    ]
+                },
+                {
+                    "title": "Background and Context",
+                    "subtopics": [
+                        {"title": "Historical Context", "status": "pending",
+                         "search_phrase": f"{problem_statement} background history context previous events"},
+                        {"title": "Related Issues", "status": "pending",
+                         "search_phrase": f"{problem_statement} related connected issues topics cases similar examples"}
+                    ]
+                },
+                {
+                    "title": "Future Outlook",
+                    "subtopics": [
+                        {"title": "Predictions and Forecasts", "status": "pending",
+                         "search_phrase": f"{problem_statement} predictions forecasts future outlook expectations"},
+                        {"title": "Upcoming Events", "status": "pending",
+                         "search_phrase": f"{problem_statement} upcoming scheduled planned future events developments"}
+                    ]
+                }
+            ]
+        elif self.search_purpose == 'general':
+            # Default topics for general search content
+            return [
+                {
+                    "title": "Overview and Fundamentals",
+                    "subtopics": [
+                        {"title": f"What is {problem_statement}", "status": "pending",
+                         "search_phrase": f"what is {problem_statement} definition explanation meaning overview"},
+                        {"title": "Key Concepts", "status": "pending",
+                         "search_phrase": f"{problem_statement} key basic concepts terminology fundamentals elements"},
+                        {"title": "Types and Categories", "status": "pending",
+                         "search_phrase": f"{problem_statement} types categories classifications varieties kinds"}
+                    ]
+                },
+                {
+                    "title": "History and Development",
+                    "subtopics": [
+                        {"title": "Origins and History", "status": "pending",
+                         "search_phrase": f"{problem_statement} origins history beginning development evolution"},
+                        {"title": "Major Developments", "status": "pending",
+                         "search_phrase": f"{problem_statement} major significant developments milestones advancements"}
+                    ]
+                },
+                {
+                    "title": "Applications and Uses",
+                    "subtopics": [
+                        {"title": "Common Applications", "status": "pending",
+                         "search_phrase": f"{problem_statement} common applications uses purposes functions utilities"},
+                        {"title": "Real-World Examples", "status": "pending",
+                         "search_phrase": f"{problem_statement} examples cases instances real-world applications"},
+                        {"title": "Benefits and Advantages", "status": "pending",
+                         "search_phrase": f"{problem_statement} benefits advantages positive aspects good points"}
+                    ]
+                },
+                {
+                    "title": "Issues and Considerations",
+                    "subtopics": [
+                        {"title": "Common Challenges", "status": "pending",
+                         "search_phrase": f"{problem_statement} challenges problems issues difficulties concerns"},
+                        {"title": "Limitations", "status": "pending",
+                         "search_phrase": f"{problem_statement} limitations restrictions drawbacks constraints weaknesses"},
+                        {"title": "Ethical Considerations", "status": "pending",
+                         "search_phrase": f"{problem_statement} ethical moral social considerations implications issues"}
+                    ]
+                },
+                {
+                    "title": "Future Directions",
+                    "subtopics": [
+                        {"title": "Current Trends", "status": "pending",
+                         "search_phrase": f"{problem_statement} current recent trends patterns developments directions"},
+                        {"title": "Future Outlook", "status": "pending",
+                         "search_phrase": f"{problem_statement} future outlook predictions forecasts expectations"}
                     ]
                 }
             ]
@@ -820,6 +942,8 @@ This file tracks the generated topics and subtopics for your academic research p
         5. Be written in {self.language} language
         6. Use a formal academic tone
         7. Be formatted in markdown with the title "# Conclusion"
+        8. Don't be afraid to be exact and share your own thoughts and insights based on the topics and subtopics findings.
+        9. Make the conclusion clear and direct.
         
         Return only the conclusion text in markdown format, starting with "# Conclusion".
         """
@@ -1003,7 +1127,32 @@ This file tracks the generated topics and subtopics for your academic research p
             with open(final_paper_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(all_content))
             
-            logger.info(f"Final paper generated at: {final_paper_path}")
+            logger.info(f"Initial final paper generated at: {final_paper_path}")
+            
+            # Optimize the final paper content with LLM if enabled
+            if self.optimize_final_paper:
+                try:
+                    logger.info("Optimizing final paper content with LLM...")
+                    
+                    # Read the paper content
+                    with open(final_paper_path, "r", encoding="utf-8") as f:
+                        paper_content = f.read()
+                    
+                    # Optimize the content
+                    optimized_content = self._optimize_final_paper_with_llm(paper_content)
+                    
+                    # Write the optimized content back to the file
+                    if optimized_content:
+                        with open(final_paper_path, "w", encoding="utf-8") as f:
+                            f.write(optimized_content)
+                        logger.info("Final paper successfully optimized")
+                    else:
+                        logger.warning("Failed to optimize final paper, keeping original content")
+                except Exception as e:
+                    logger.error(f"Error during final paper optimization: {str(e)}")
+                    logger.warning("Using unoptimized final paper due to optimization error")
+            else:
+                logger.info("Final paper optimization skipped (disabled by user)")
             
             # Convert to the requested format if not markdown
             if self.output_format != "md":
@@ -1454,37 +1603,191 @@ This file tracks the generated topics and subtopics for your academic research p
                 'Referer': 'https://www.google.com/'
             }
             
-            # Download the PDF with headers
-            response = requests.get(url, stream=True, timeout=self.timeout, headers=headers)
-            
-            # Check if the response is valid
-            if response.status_code != 200:
-                # If we get a 403 Forbidden error, try with Selenium browser
-                if response.status_code == 403:
-                    logger.warning(f"Got 403 Forbidden error, trying with browser: {url}")
-                    return self._download_pdf_with_browser(url, pdf_path)
+            # Try to download normally first
+            try:
+                # Try a regular request first
+                logger.info("Attempting direct download with requests")
+                response = requests.get(url, headers=headers, allow_redirects=True, timeout=30)
+                
+                if response.status_code == 200:
+                    # Check if content is actually a PDF
+                    content = response.content
+                    if content.startswith(b'%PDF-'):
+                        # Save the PDF
+                        with open(pdf_path, "wb") as f:
+                            f.write(content)
+                        
+                        logger.info(f"Successfully downloaded PDF to {pdf_path}")
+                        return pdf_path
+                    else:
+                        logger.warning(f"Downloaded content is not a PDF: {url}")
                 else:
-                    logger.warning(f"Failed to download PDF: {url} (Status code: {response.status_code})")
-                    return None
+                    logger.warning(f"Failed to download PDF, status code: {response.status_code}")
+            except Exception as e:
+                logger.warning(f"Exception during direct download: {str(e)}")
             
-            # Check if the content type is PDF
-            content_type = response.headers.get('Content-Type', '').lower()
-            if 'application/pdf' not in content_type and not url.lower().endswith('.pdf'):
-                # Try to check if it's actually a PDF despite the content type
-                if self._is_pdf_content(response.content):
-                    logger.info(f"Content appears to be PDF despite Content-Type: {content_type}")
+            # If direct download failed, try with the browser
+            logger.info("Direct download failed, attempting with browser")
+            try:
+                # Keep track of the current window handle
+                original_window = None
+                if self.browser:
+                    try:
+                        original_window = self.browser.current_window_handle
+                    except:
+                        # Browser might not be initialized or have windows
+                        self.start_browser()
+                        original_window = self.browser.current_window_handle
                 else:
-                    logger.warning(f"URL does not point to a PDF: {url} (Content-Type: {content_type})")
-                    return None
-            
-            # Save the PDF
-            with open(pdf_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+                    # Start the browser if it's not running
+                    self.start_browser()
+                    original_window = self.browser.current_window_handle
+                
+                # Create a temp directory for downloads
+                import tempfile
+                temp_download_dir = tempfile.mkdtemp()
+                
+                # Set up preferences for PDF download (no PDF viewer)
+                options = webdriver.ChromeOptions()
+                
+                # Set download preferences
+                prefs = {
+                    'download.default_directory': temp_download_dir,
+                    'download.prompt_for_download': False,
+                    'download.directory_upgrade': True,
+                    'plugins.always_open_pdf_externally': True,
+                    'profile.default_content_settings.popups': 0
+                }
+                options.add_experimental_option('prefs', prefs)
+                
+                # Create a new browser instance for downloading
+                download_browser = webdriver.Chrome(options=options)
+                
+                try:
+                    # Navigate to the URL
+                    logger.info(f"Navigating to PDF URL: {url}")
+                    download_browser.set_page_load_timeout(30)
+                    download_browser.get(url)
+                    
+                    # Wait a bit for download to potentially start
+                    time.sleep(10)
+                    
+                    # Check if a file was downloaded
+                    downloaded_files = os.listdir(temp_download_dir)
+                    
+                    if downloaded_files:
+                        # Get the first downloaded file
+                        downloaded_file = os.path.join(temp_download_dir, downloaded_files[0])
+                        
+                        # Check if it's a PDF
+                        with open(downloaded_file, 'rb') as f:
+                            content = f.read(10)  # Just read the first few bytes
+                            if content.startswith(b'%PDF-'):
+                                # Move the file to the target location
+                                shutil.move(downloaded_file, pdf_path)
+                                logger.info(f"Successfully downloaded PDF with browser to {pdf_path}")
+                                return pdf_path
+                            else:
+                                logger.warning(f"Downloaded file is not a PDF: {downloaded_file}")
+                    else:
+                        # If no file was automatically downloaded, try to find and click download buttons
+                        download_buttons = []
+                        
+                        # Possible selectors for download buttons/links
+                        download_selectors = [
+                            "a[download]",
+                            "a[href$='.pdf']",
+                            "a[href*='download']",
+                            "button:contains('Download')",
+                            "a:contains('Download')",
+                            ".download-button",
+                            "#download",
+                            "[data-testid='download']"
+                        ]
+                        
+                        for selector in download_selectors:
+                            try:
+                                elements = download_browser.find_elements(By.CSS_SELECTOR, selector)
+                                download_buttons.extend(elements)
+                            except:
+                                pass
+                        
+                        if download_buttons:
+                            # Try clicking the first download button
+                            try:
+                                logger.info(f"Found {len(download_buttons)} potential download buttons, clicking first one")
+                                download_buttons[0].click()
+                                
+                                # Wait for download
+                                time.sleep(10)
+                                
+                                # Check again for downloaded files
+                                downloaded_files = os.listdir(temp_download_dir)
+                                
+                                if downloaded_files:
+                                    # Get the first downloaded file
+                                    downloaded_file = os.path.join(temp_download_dir, downloaded_files[0])
+                                    
+                                    # Check if it's a PDF
+                                    with open(downloaded_file, 'rb') as f:
+                                        content = f.read(10)
+                                        if content.startswith(b'%PDF-'):
+                                            # Move the file to the target location
+                                            shutil.move(downloaded_file, pdf_path)
+                                            logger.info(f"Successfully downloaded PDF after clicking button to {pdf_path}")
+                                            return pdf_path
+                                        else:
+                                            logger.warning(f"Downloaded file after clicking is not a PDF: {downloaded_file}")
+                            except Exception as e:
+                                logger.warning(f"Error clicking download button: {str(e)}")
+                        
+                        # If we still don't have a PDF, try to save the page content directly
+                        try:
+                            page_source = download_browser.page_source
                             
-            logger.info(f"PDF downloaded successfully: {pdf_path}")
-            return pdf_path
+                            # Check if the page might be a PDF displayed in the browser
+                            if '<embed' in page_source and 'pdf' in page_source.lower():
+                                logger.info("Page appears to be a PDF viewer, saving source")
+                                
+                                # Save the page source
+                                with open(pdf_path, 'wb') as f:
+                                    f.write(page_source.encode('utf-8'))
+                                
+                                # Check if the saved file is a PDF
+                                if self._is_pdf_content(open(pdf_path, 'rb').read()):
+                                    logger.info(f"Successfully saved embedded PDF to {pdf_path}")
+                                    return pdf_path
+                                else:
+                                    logger.warning("Saved content is not a valid PDF")
+                                    os.remove(pdf_path)  # Remove the invalid file
+                        except Exception as e:
+                            logger.warning(f"Error saving page content as PDF: {str(e)}")
+                
+                finally:
+                    # Close the download browser
+                    try:
+                        download_browser.quit()
+                    except:
+                        pass
+                    
+                    # Clean up the temp directory
+                    try:
+                        shutil.rmtree(temp_download_dir)
+                    except:
+                        pass
+                    
+                    # Switch back to the original window if it exists
+                    if original_window:
+                        try:
+                            self.browser.switch_to.window(original_window)
+                        except:
+                            pass
+                
+            except Exception as e:
+                logger.error(f"Error downloading PDF with browser: {str(e)}")
+            
+            logger.error(f"All attempts to download PDF failed: {url}")
+            return None
             
         except Exception as e:
             logger.error(f"Error downloading PDF {url}: {str(e)}")
@@ -1626,17 +1929,38 @@ This file tracks the generated topics and subtopics for your academic research p
                 logger.error(f"Failed to extract text from PDF: {pdf_path}")
                 return None
             
-            # Determine content type based on topic keywords
+            # Determine content type based on search_purpose first, then fallback to keyword detection
             content_type = "academic"  # Default
             
-            # Check for practical/how-to content
-            if any(keyword in topic.lower() for keyword in ["introduction", "step", "process", "tips", "techniques", "basics", "guide"]):
+            # First check the search_purpose parameter
+            if self.search_purpose == "practical":
                 content_type = "practical"
-                
-            # Check for travel content
-            elif any(keyword in topic.lower() for keyword in ["travel", "visit", "tourism", "vacation", "destination", "trip", "tour", "places", 
-                                                           "overview", "planning", "accommodation", "attractions", "dining"]):
+            elif self.search_purpose == "travel":
                 content_type = "travel"
+            elif self.search_purpose == "news":
+                content_type = "recent_news"
+            elif self.search_purpose == "general":
+                content_type = "general_search"
+            # Only use keyword detection if search_purpose is "academic" or not specified
+            elif self.search_purpose == "academic":
+                # Check for practical/how-to content
+                if any(keyword in topic.lower() for keyword in ["introduction", "step", "process", "tips", "techniques", "basics", "guide"]):
+                    content_type = "practical"
+                    
+                # Check for travel content
+                elif any(keyword in topic.lower() for keyword in ["travel", "visit", "tourism", "vacation", "destination", "trip", "tour", "places", 
+                                                               "overview", "planning", "accommodation", "attractions", "dining"]):
+                    content_type = "travel"
+                
+                # Check for recent news content
+                elif any(keyword in topic.lower() for keyword in ["news", "current events", "latest", "update", "recent", "breaking", "today", 
+                                                               "developments", "announcement", "headlines", "trending"]):
+                    content_type = "recent_news"
+                    
+                # Check for general search content
+                elif any(keyword in topic.lower() for keyword in ["overview", "general", "information", "introduction", "basics", "fundamental", 
+                                                              "summary", "explained", "101", "beginner", "comprehensive"]):
+                    content_type = "general_search"
             
             # Create prompt based on content type
             if content_type == "practical":
@@ -1673,7 +1997,42 @@ This file tracks the generated topics and subtopics for your academic research p
                 
                 Document text:
                 {text}
-                #Karakter sınırlaması
+                """
+            elif content_type == "recent_news":
+                prompt = f"""
+                Extract recent news information from this document about:
+                
+                Topic: {topic}
+                Subtopic: {subtopic}
+                
+                Focus on current events, recent developments, news updates, and timely information.
+                Format as a concise news article with clear headline, key points, and contextual information.
+                Include dates, statistics, and quotes where relevant.
+                
+                {'' if self.language == 'en' else f'Ensure the content is in {self.language} language.'}
+                
+                IMPORTANT: Your response will be directly inserted into a markdown document. DO NOT include any meta-commentary, suggestions, or notes about the content. DO NOT start with phrases like "Here's the extracted information" or "Based on the document". Just provide the actual content.
+                
+                Document text:
+                {text}
+                """
+            elif content_type == "general_search":
+                prompt = f"""
+                Extract comprehensive information from this document about:
+                
+                Topic: {topic}
+                Subtopic: {subtopic}
+                
+                Focus on providing a balanced overview with useful facts, explanations, and key information.
+                Format as an informative article with clear structure and accessible language.
+                Cover both basic concepts and specific details that would be valuable to someone learning about this topic.
+                
+                {'' if self.language == 'en' else f'Ensure the content is in {self.language} language.'}
+                
+                IMPORTANT: Your response will be directly inserted into a markdown document. DO NOT include any meta-commentary, suggestions, or notes about the content. DO NOT start with phrases like "Here's the extracted information" or "Based on the document". Just provide the actual content.
+                
+                Document text:
+                {text}
                 """
             else:
                 prompt = f"""
@@ -1732,6 +2091,7 @@ This file tracks the generated topics and subtopics for your academic research p
                 logger.info(f"Extracting content from PDF {i+1}/{len(pdf_paths)}: {pdf_path}")
                 content = self._extract_pdf_content(pdf_path, topic, subtopic)
                 if content:
+                    print(content)
                     pdf_contents.append(content)
                     logger.info(f"Successfully added content from PDF {i+1}")
                 else:
@@ -2287,7 +2647,7 @@ This file tracks the generated topics and subtopics for your academic research p
             self.browser.set_page_load_timeout(30)  # Increased from 10 seconds
             
             # Navigate directly to the search URL with page number if needed
-            if search_engine and "duckduckgo" in search_engine.lower():
+            if search_engine and "duckduckgo.com" in search_engine.lower():
                 if page_num > 1:
                     search_url = f"https://duckduckgo.com/?q={quote_plus(search_query)}&t=h_&ia=web&s={(page_num-1)*30}"
                 else:
@@ -2299,7 +2659,50 @@ This file tracks the generated topics and subtopics for your academic research p
                     search_url = f"https://www.google.com/search?q={quote_plus(search_query)}"
             
             logger.info(f"Navigating to search engine: {search_url} (Page {page_num})")
-            self.browser.get(search_url)
+            
+            # Increase timeout to prevent premature errors
+            self.browser.set_page_load_timeout(60)  # Increased to 60 seconds
+            
+            try:
+                self.browser.get(search_url)
+                
+                # Wait for the search results to load
+                logger.info("Waiting for search results to load...")
+                
+                # Try to wait for specific elements based on the search engine
+                try:
+                    if "google.com" in search_url:
+                        # Wait for Google search results
+                        WebDriverWait(self.browser, 20).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "#search"))
+                        )
+                    elif "duckduckgo.com" in search_url:
+                        # Wait for DuckDuckGo search results
+                        WebDriverWait(self.browser, 20).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, ".results"))
+                        )
+                    elif "bing.com" in search_url:
+                        # Wait for Bing search results
+                        WebDriverWait(self.browser, 20).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "#b_results"))
+                        )
+                    else:
+                        # Generic wait for any search engine
+                        WebDriverWait(self.browser, 20).until(
+                            EC.presence_of_element_located((By.TAG_NAME, "a"))
+                        )
+                    
+                    logger.info("Search results page loaded successfully")
+                except Exception as e:
+                    logger.warning(f"Timeout waiting for search results: {str(e)}")
+                    # Continue anyway as the page might still have loaded
+                
+                # Additional delay to make sure JavaScript has finished rendering the page
+                time.sleep(5)
+                
+            except Exception as e:
+                logger.error(f"Error loading search URL: {str(e)}")
+                # If there's an error, still try to take a screenshot
             
             # Take a screenshot of the search results (only small screenshot instead of full page)
             screenshot_path = os.path.join(self.output_dir, f"search_results_page{page_num}.png")
@@ -2367,26 +2770,131 @@ This file tracks the generated topics and subtopics for your academic research p
                 # Fallback to more general selectors if vision model didn't find links
                 if not html_urls:
                     logger.info("Using general selectors to find links")
-                    # Find all links on the page
-                    result_links = self.browser.find_elements(By.TAG_NAME, "a")
                     
-                    # Extract URLs from all links
-                    for link in result_links:
+                    # Specific selectors for Google search results (these change frequently)
+                    google_selectors = [
+                        "div.g div.yuRUbf > a",  # Current main result links (April 2023+)
+                        "div.g .tF2Cxc > a",     # Earlier result links
+                        "div.rc > a",            # Old style results
+                        "div.g a[href]",         # More general approach
+                        ".r a",                  # Very old style
+                        "#search a[href]:not([href*='webcache']):not([href*='google.com'])",  # General results, exclude some Google links
+                        "h3.LC20lb",             # Result titles (may be clickable)
+                    ]
+                    
+                    # Specific selectors for other search engines
+                    duckduckgo_selectors = [
+                        ".result__a",          # Standard results
+                        ".result__body a",     # Result body links
+                        ".result__url",        # URL display
+                        ".results_links a",    # General result links
+                        "article a[href]",     # Newer results
+                        "[data-testid='result-title-a']", # Latest selector (2023+)
+                        ".nrn-react-div a[href]" # General app container
+                    ]
+                    
+                    # Bing selectors
+                    bing_selectors = [
+                        "h2 a[href]",                  # Main result links
+                        ".b_algo a[href]:not([href*='bing.com'])",  # Standard results
+                        "#b_results a[href]:not([href*='bing.com'])",  # All results
+                        ".b_title a"                   # Title links
+                    ]
+                    
+                    # Choose selectors based on current URL
+                    current_url = self.browser.current_url.lower()
+                    if "google" in current_url:
+                        current_selectors = google_selectors
+                        logger.info("Using Google-specific selectors")
+                    elif "duckduckgo" in current_url:
+                        current_selectors = duckduckgo_selectors
+                        logger.info("Using DuckDuckGo-specific selectors")
+                    elif "bing" in current_url:
+                        current_selectors = bing_selectors
+                        logger.info("Using Bing-specific selectors")
+                    else:
+                        # If on an unknown search engine, try all selectors
+                        current_selectors = google_selectors + duckduckgo_selectors + bing_selectors
+                        logger.info("Using all available search engine selectors")
+                    
+                    # Try each selector and log results for debugging
+                    for selector in current_selectors:
                         try:
-                            url = link.get_attribute("href")
-                            # Filter out navigation links, ads, etc.
-                            if url and url.startswith("http") and not url.endswith('.pdf'):
-                                # Check if URL contains any excluded domain
-                                parsed_url = urlparse(url)
-                                domain = parsed_url.netloc
+                            logger.debug(f"Trying selector: {selector}")
+                            result_links = self.browser.find_elements(By.CSS_SELECTOR, selector)
+                            logger.debug(f"Found {len(result_links)} elements with selector {selector}")
+                            
+                            # Extract URLs from links
+                            for link in result_links:
+                                try:
+                                    url = link.get_attribute("href")
+                                    # Filter out navigation links, ads, etc.
+                                    if url and url.startswith("http") and not url.endswith('.pdf'):
+                                        # Check if URL contains any excluded domain
+                                        parsed_url = urlparse(url)
+                                        domain = parsed_url.netloc
+                                        
+                                        if not any(excluded in domain.lower() for excluded in excluded_domains):
+                                            # Check if the link text suggests it's a content result
+                                            link_text = link.text.strip()
+                                            if link_text and len(link_text) > 10:  # Likely a content link if it has substantial text
+                                                html_urls.append(url)
+                                                logger.debug(f"Added URL: {url}")
+                                except Exception as e:
+                                    logger.debug(f"Error extracting URL from link: {str(e)}")
+                            
+                            # If we found some links, we can stop trying selectors
+                            if html_urls:
+                                logger.info(f"Found {len(html_urls)} links with selector: {selector}")
+                                break
                                 
-                                if not any(excluded in domain.lower() for excluded in excluded_domains):
-                                    # Check if the link text suggests it's a content result
-                                    link_text = link.text.strip()
-                                    if link_text and len(link_text) > 10:  # Likely a content link if it has substantial text
-                                        html_urls.append(url)
                         except Exception as e:
-                            logger.debug(f"Error extracting URL from link: {str(e)}")
+                            logger.debug(f"Error using selector {selector}: {str(e)}")
+                    
+                    # Last resort: get ALL links on the page
+                    if not html_urls:
+                        logger.warning("No links found with specific selectors, trying ALL links")
+                        try:
+                            all_links = self.browser.find_elements(By.TAG_NAME, "a")
+                            logger.info(f"Found {len(all_links)} total links on page")
+                            
+                            for link in all_links:
+                                try:
+                                    url = link.get_attribute("href")
+                                    if url and url.startswith("http") and not url.endswith('.pdf'):
+                                        # Take screenshot of the link for debugging
+                                        try:
+                                            self.browser.execute_script("arguments[0].scrollIntoView();", link)
+                                            time.sleep(0.5)
+                                            link_screenshot = os.path.join(self.output_dir, f"link_{len(html_urls)}.png")
+                                            self.browser.save_screenshot(link_screenshot)
+                                            logger.debug(f"Saved link screenshot to {link_screenshot}")
+                                        except:
+                                            pass
+                                    
+                                        # Only include links that have visible text
+                                        link_text = link.text.strip()
+                                        is_visible = False
+                                        try:
+                                            is_visible = link.is_displayed() and link_text and len(link_text) > 5
+                                        except:
+                                            pass
+                                            
+                                        if is_visible:
+                                            # Skip search engine domains
+                                            parsed_url = urlparse(url)
+                                            domain = parsed_url.netloc
+                                            if not any(excluded in domain.lower() for excluded in excluded_domains):
+                                                html_urls.append(url)
+                                                logger.debug(f"Added URL from all-links: {url}")
+                                except Exception as e:
+                                    logger.debug(f"Error processing link: {str(e)}")
+                            
+                            # Take first 10 URLs max from all links (they're less likely to be good results)
+                            html_urls = html_urls[:10]
+                            logger.info(f"Added {len(html_urls)} URLs from all links on page")
+                        except Exception as e:
+                            logger.error(f"Error getting all links: {str(e)}")
                 
                 # Filter out duplicate URLs
                 html_urls = list(dict.fromkeys(html_urls))
@@ -2696,7 +3204,7 @@ This file tracks the generated topics and subtopics for your academic research p
         Please optimize the following content by:
         1. Make sure you are using all the information provided in the content
         2. The result MUST be in {self.language} language. Translate all content into {self.language} language except commonly used international words.
-        3. you can merge the repetative information and make it more concise and coherent.
+        3. Merge repetitive informations meaningfully.
         4. Do not use your own words to explain the content, just use the information provided in the content.
         5. Don't add the irrevelant parts of the content. Every information in the content should be relevant to the topic and subtopic.
         6. Do not add any other text or phrases like "Here is the information" or "Based on the webpage" etc.
@@ -2747,6 +3255,220 @@ This file tracks the generated topics and subtopics for your academic research p
             logger.error(f"Error optimizing content with LLM: {str(e)}")
             # Keep original content in case of error
             logger.info("Keeping original content due to optimization error")
+
+    def _optimize_final_paper_with_llm(self, paper_content: str) -> str:
+        """
+        Optimize the final paper content using the LLM.
+        Uses a progressive chunking approach to handle large documents.
+        
+        Args:
+            paper_content: The content of the final paper
+            
+        Returns:
+            Optimized content of the final paper
+        """
+        logger.info("Optimizing final paper with LLM...")
+        
+        # Create a backup of the original content
+        backup_content = paper_content
+        
+        # Count initial sections to validate result later
+        initial_headings = len(re.findall(r'^#+\s+.+$', paper_content, re.MULTILINE))
+        initial_paragraphs = len(re.findall(r'\n\n.+', paper_content))
+        logger.info(f"Initial paper has {initial_headings} headings and approximately {initial_paragraphs} paragraphs")
+        
+        # Try with the entire content first
+        optimized_content = self._try_optimize_chunk(paper_content)
+        if optimized_content and self._validate_optimized_content(paper_content, optimized_content):
+            logger.info("Successfully optimized entire paper as one chunk")
+            return optimized_content
+        
+        # If that failed, try with progressive chunking
+        max_chunks = 10  # Maximum number of chunks to try
+        overlap = 150    # Increased overlap for better continuity
+        
+        for num_chunks in range(2, max_chunks + 1):
+            logger.info(f"Trying to optimize with {num_chunks} chunks")
+            result = self._optimize_with_n_chunks(paper_content, num_chunks, overlap)
+            if result and self._validate_optimized_content(paper_content, result):
+                logger.info(f"Successfully optimized paper with {num_chunks} chunks")
+                return result
+        
+        # If all chunking attempts failed, return the original content
+        logger.warning("All chunking attempts failed, returning original content")
+        return backup_content
+    
+    def _validate_optimized_content(self, original_content: str, optimized_content: str) -> bool:
+        """
+        Validate that the optimized content is complete and contains all necessary sections.
+        
+        Args:
+            original_content: Original content
+            optimized_content: Optimized content
+            
+        Returns:
+            Whether the optimized content is valid
+        """
+        # Check if content is significantly shorter than original
+        if len(optimized_content) < len(original_content) * 0.8:
+            logger.warning(f"Optimized content is too short: {len(optimized_content)} vs {len(original_content)} chars")
+            return False
+            
+        # Check if all main headings are preserved (approximately)
+        original_headings = len(re.findall(r'^#+\s+.+$', original_content, re.MULTILINE))
+        optimized_headings = len(re.findall(r'^#+\s+.+$', optimized_content, re.MULTILINE))
+        
+        heading_ratio = optimized_headings / original_headings if original_headings > 0 else 1
+        if heading_ratio < 0.8:
+            logger.warning(f"Too few headings in optimized content: {optimized_headings} vs {original_headings}")
+            return False
+            
+        # Check for abrupt ending (text ending in the middle of a sentence)
+        last_chars = optimized_content[-100:].strip()
+        if last_chars and not any(last_chars.endswith(ending) for ending in ['.', '!', '?', ':', ')', ']', '}']):
+            logger.warning(f"Content appears to end abruptly: '{last_chars[-50:]}'")
+            return False
+            
+        # Check for references section
+        if "# Referans" in original_content and "# Referans" not in optimized_content:
+            logger.warning("References section missing from optimized content")
+            return False
+            
+        logger.info("Optimized content validation passed")
+        return True
+
+    def _try_optimize_chunk(self, chunk_content: str) -> Optional[str]:
+        """Attempt to optimize a single chunk of content."""
+        try:
+            prompt = f"""
+            You are an expert academic editor. Your task is to optimize and improve the following research paper:
+
+            1. Fix any grammatical errors and improve sentence structure
+            2. Enhance coherence and flow between sections
+            3. Standardize formatting and ensure consistent style
+            4. Remove redundancies and repetitive information
+            5. Ensure consistent terminology and voice throughout
+            6. Maintain all academic references and citations exactly as they are
+            7. Preserve the original structure, headings, and section organization
+            8. Ensure the content is in {self.language} language
+            9. Make sure your response is COMPLETE and includes ALL the content from the original paper
+
+            IMPORTANT: Your response should contain ONLY the revised paper text. Do not include any meta-commentary,
+            explanations of changes, or notes. Your output will be directly saved as the final paper.
+            Make absolutely sure that you don't truncate or cut off the paper - include the ENTIRE content including all sections.
+
+            Here is the research paper content:
+            
+            {chunk_content}
+            """
+            
+            # Call the LLM with extended retry for timeout errors
+            result = self._api_call_with_retry(
+                lambda: self.gemini.generate_content(prompt).text,
+                max_retries=5,
+                retry_delay=5
+            )
+            
+            if result:
+                logger.info("Successfully optimized content chunk")
+                return result
+            else:
+                logger.warning("Failed to optimize content chunk, result was empty")
+                return None
+                
+        except Exception as e:
+            error_msg = str(e)
+            if "504" in error_msg or "deadline exceeded" in error_msg.lower() or "timeout" in error_msg.lower():
+                logger.warning(f"Timeout error while optimizing chunk: {error_msg}")
+                return None
+            else:
+                logger.error(f"Error optimizing chunk: {error_msg}")
+                return None
+
+    def _optimize_with_n_chunks(self, paper_content: str, num_chunks: int, overlap: int) -> Optional[str]:
+        """Split content into n chunks with overlap and optimize each."""
+        # Calculate chunk size
+        total_length = len(paper_content)
+        chunk_size = total_length // num_chunks + overlap
+        
+        chunks = []
+        optimized_chunks = []
+        chunk_boundaries = []
+        
+        # Create overlapping chunks
+        for i in range(num_chunks):
+            start = max(0, i * chunk_size - overlap if i > 0 else 0)
+            end = min(total_length, (i + 1) * chunk_size)
+            chunk = paper_content[start:end]
+            chunks.append(chunk)
+            chunk_boundaries.append((start, end))
+            logger.info(f"Chunk {i+1}: {len(chunk)} chars ({start}-{end})")
+        
+        # Optimize each chunk
+        for i, chunk in enumerate(chunks):
+            logger.info(f"Optimizing chunk {i+1}/{num_chunks} ({len(chunk)} chars)")
+            optimized = self._try_optimize_chunk(chunk)
+            if optimized:
+                optimized_chunks.append(optimized)
+            else:
+                logger.warning(f"Failed to optimize chunk {i+1}, using original")
+                optimized_chunks.append(chunk)
+        
+        # If any chunk failed to optimize, the whole process failed
+        if len(optimized_chunks) != num_chunks:
+            logger.warning(f"Not all chunks were optimized ({len(optimized_chunks)}/{num_chunks})")
+            return None
+        
+        # Combine optimized chunks, removing overlap
+        if num_chunks == 1:
+            return optimized_chunks[0]
+        
+        final_result = []
+        for i, chunk in enumerate(optimized_chunks):
+            if i == 0:
+                # For first chunk, use the whole thing
+                final_result.append(chunk)
+            else:
+                # For subsequent chunks, try to find a good joining point in the overlap region
+                prev_end = final_result[-1][-overlap:] if len(final_result[-1]) > overlap else final_result[-1]
+                curr_start = chunk[:overlap] if len(chunk) > overlap else chunk
+                
+                # Find a sentence break in the overlap if possible
+                # This helps create better transitions between chunks
+                join_point = self._find_best_join_point(prev_end, curr_start)
+                
+                # Add the non-overlapping part plus the overlap after the join point
+                final_result[-1] = final_result[-1][:-overlap] + prev_end[:join_point]
+                final_result.append(chunk[join_point:])
+        
+        combined = "".join(final_result)
+        
+        # Final validation to ensure we have a complete document
+        if self._validate_optimized_content(paper_content, combined):
+            logger.info(f"Successfully combined {num_chunks} optimized chunks ({len(combined)} chars)")
+            return combined
+        else:
+            logger.warning("Combined content failed validation, may be incomplete")
+            return None
+
+    def _find_best_join_point(self, text1: str, text2: str) -> int:
+        """Find the best point to join two overlapping text segments."""
+        # Look for sentence boundaries (., !, ?)
+        sentence_breaks = [i for i, char in enumerate(text1) if char in ('.', '!', '?')]
+        
+        if sentence_breaks:
+            # Use the last sentence break
+            return sentence_breaks[-1] + 1
+        
+        # If no sentence breaks, look for paragraph breaks
+        paragraph_breaks = [i for i, char in enumerate(text1) if char == '\n']
+        
+        if paragraph_breaks:
+            # Use the last paragraph break
+            return paragraph_breaks[-1] + 1
+        
+        # If no good break points, use the middle
+        return len(text1) // 2
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -2806,8 +3528,8 @@ def parse_arguments():
         "--search-purpose",
         type=str,
         default="academic",
-        choices=["academic", "news", "practical", "travel"],
-        help="Purpose of the search (default: academic). Options: academic, news, practical, travel"
+        choices=["academic", "news", "practical", "travel", "general"],
+        help="Purpose of the search (default: academic). Options: academic, news, practical, travel, general"
     )
     
     parser.add_argument(
@@ -2831,15 +3553,103 @@ def parse_arguments():
         help="Set this flag to make PDFs optional (equivalent to --require-pdfs=False)"
     )
     
+    parser.add_argument(
+        "--optimize-final-paper",
+        action="store_true",
+        default=True,
+        help="Whether to optimize the final paper with LLM (default: True)"
+    )
+
+    parser.add_argument(
+        "--no-optimize-final-paper",
+        action="store_true",
+        help="Disable final paper optimization with LLM (sets --optimize-final-paper=False)"
+    )
+    
+    parser.add_argument(
+        "--optimize-only",
+        type=str,
+        metavar="FINAL_PAPER_PATH",
+        help="Only optimize an existing final paper without conducting research (provide path to the paper)"
+    )
+    
     args = parser.parse_args()
     
+    # Handle the --no-optimize-final-paper flag (similar to how --no-pdfs is handled)
+    if args.no_optimize_final_paper:
+        args.optimize_final_paper = False
+    
     return args
+
+def _optimize_existing_final_paper(paper_path: str, language: str = "en") -> str:
+    """
+    Optimizes an existing final paper without conducting research.
+    
+    Args:
+        paper_path: Path to the existing final paper
+        language: Language code for the output
+        
+    Returns:
+        Path to the optimized paper
+    """
+    if not os.path.exists(paper_path):
+        logger.error(f"Final paper not found at {paper_path}")
+        return ""
+        
+    try:
+        # Initialize LazyScholar with minimal configuration
+        scholar = LazyScholar(
+            output_dir=os.path.dirname(paper_path),
+            language=language
+        )
+        
+        # Read the paper content
+        with open(paper_path, "r", encoding="utf-8") as f:
+            paper_content = f.read()
+            
+        logger.info(f"Optimizing existing paper: {paper_path}")
+        
+        # Create a backup of the original paper
+        backup_path = f"{paper_path}.bak"
+        shutil.copy2(paper_path, backup_path)
+        logger.info(f"Created backup at: {backup_path}")
+        
+        # Optimize the content
+        optimized_content = scholar._optimize_final_paper_with_llm(paper_content)
+        
+        # Write the optimized content back to the file
+        if optimized_content:
+            with open(paper_path, "w", encoding="utf-8") as f:
+                f.write(optimized_content)
+            logger.info(f"Paper successfully optimized: {paper_path}")
+            return paper_path
+        else:
+            logger.error("Failed to optimize paper")
+            # Restore from backup
+            shutil.copy2(backup_path, paper_path)
+            logger.info(f"Restored original content from backup")
+            return ""
+            
+    except Exception as e:
+        logger.error(f"Error optimizing paper: {str(e)}")
+        return ""
 
 def main():
     """Main entry point for the LazyScholar application."""
     try:
         # Parse command line arguments
         args = parse_arguments()
+        
+        # Check if we only need to optimize an existing paper
+        if args.optimize_only:
+            logger.info("Running in optimize-only mode")
+            result = _optimize_existing_final_paper(args.optimize_only, args.language)
+            if result:
+                logger.info("Optimization completed successfully")
+                return
+            else:
+                logger.error("Optimization failed")
+                return
         
         # Configure logging
         logger.info("Parsing command line arguments...")
@@ -2867,6 +3677,7 @@ def main():
         require_pdfs = not args.no_pdfs if args.no_pdfs else args.require_pdfs
         logger.info(f"Require PDFs: {require_pdfs}")
         logger.info(f"Output format: {args.output_format}")
+        logger.info(f"Optimize final paper: {args.optimize_final_paper}")
         
         # Initialize LazyScholar
         logger.info("Initializing LazyScholar...")
@@ -2886,7 +3697,8 @@ def main():
             search_purpose=args.search_purpose,
             require_pdfs=require_pdfs,
             output_format=args.output_format,
-            max_references_per_subtopic=args.max_references_per_subtopic
+            max_references_per_subtopic=args.max_references_per_subtopic,
+            optimize_final_paper=args.optimize_final_paper
         )
         
         # Log academic format setting
