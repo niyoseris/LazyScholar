@@ -74,3 +74,36 @@
 2. **Progress Göstergesi**: Kullanıcıya işlem durumu hakkında daha fazla bilgi verin
 3. **Başarısız İşlemleri Devam Ettirebilme**: Herhangi bir adımda hata olursa, en son başarılı adımdan devam edebilme yeteneği
 4. **Detaylı Hata Raporlama**: Hatanın nerede ve neden oluştuğuna dair ayrıntılı bilgi
+
+## Temizleme işlemi iyileştirmeleri
+
+### Problem: Belge temizleme işlemi etkili değil ve timeout hataları oluşuyor
+
+**Sorun:** LazyScholar'ın temizleme (cleanse) fonksiyonu genellikle büyük belgeler için timeout hatası veriyor ve temizlenen içerik istenen kalitede olmuyor.
+
+**Çözümler:**
+
+1. Chunklama yaklaşımı ile timeout hatalarını önleme:
+   - `_cleanse_with_chunks` fonksiyonu eklendi - aşamalı chunk bölme stratejisi uygular
+   - İçeriği önce tek parça olarak temizlemeyi dener
+   - Timeout hatası durumunda, parça sayısını kademeli olarak artırır
+   - Chunklar arasında uygun birleştirme noktaları bulur
+   - Chunkları akıllı bir şekilde birleştirir
+
+2. Temizleme yoğunluğu kontrol mekanizması:
+   - `cleanse_strength` parametresi eklendi (light, medium, aggressive)
+   - Her yoğunluk için farklı temizleme talimatları oluşturuldu
+   - Kullanıcı arayüzüne yoğunluk seçimi için radio buttonlar eklendi
+   - Minimum içerik oranı her yoğunluk için farklı belirlendi (light: 0.7, medium: 0.5, aggressive: 0.3)
+
+3. Daha iyi hata yönetimi:
+   - Timeout hatalarının spesifik olarak yakalanması
+   - Ayrıntılı hata mesajları günlüklere yazılır
+   - Her chunk işlemi için yeniden deneme mekanizması
+
+4. Prompt iyileştirmeleri:
+   - Daha net ve spesifik talimatlar
+   - Özel olarak tekrarlanan içeriğe odaklanma
+   - Dil ve tutarlılık kontrollerinin sürdürülmesi
+
+Bu değişiklikler, belge temizleme işleminin daha sağlam ve daha etkili olmasını sağlar, böylece kullanıcılar belgelerdeki tekrar eden içerikleri daha iyi temizleyebilirler.

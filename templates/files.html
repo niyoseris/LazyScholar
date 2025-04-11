@@ -64,6 +64,16 @@
                                                    data-file-name="{{ file.name }}">
                                                 <i class="fas fa-language me-1"></i>Translate
                                             </button>
+                                            {% if file.type == 'md' %}
+                                            <button type="button" 
+                                                   class="btn btn-sm btn-outline-warning"
+                                                   data-bs-toggle="modal"
+                                                   data-bs-target="#cleanseModal"
+                                                   data-file-path="{{ file.path }}"
+                                                   data-file-name="{{ file.name }}">
+                                                <i class="fas fa-broom me-1"></i>Cleanse
+                                            </button>
+                                            {% endif %}
                                         </div>
                                     </td>
                                 </tr>
@@ -143,6 +153,68 @@
     </div>
 </div>
 
+<!-- Cleanse Modal -->
+<div class="modal fade" id="cleanseModal" tabindex="-1" aria-labelledby="cleanseModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cleanseModalLabel">Cleanse Document</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="cleanseForm" action="{{ url_for('cleanse_file', profile_id=profile.id) }}" method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="filepath" id="cleanseFilePath">
+                    <div class="alert alert-info">
+                        <h6 class="alert-heading">What is Cleansing?</h6>
+                        <p>Cleansing helps improve your document by:</p>
+                        <ul class="mb-0">
+                            <li>Removing repetitive content</li>
+                            <li>Merging similar sections</li>
+                            <li>Ensuring consistent formatting</li>
+                            <li>Maintaining all original headings and structure</li>
+                            <li>Preserving academic references and citations</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="mb-3 mt-3">
+                        <label class="form-label">Cleansing Strength:</label>
+                        <div class="form-text mb-2">Select how aggressively the document should be cleansed.</div>
+                        
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="cleanse_strength" id="strengthLight" value="light">
+                            <label class="form-check-label" for="strengthLight">
+                                <strong>Light</strong> - Conservative changes, removes only obvious repetition
+                            </label>
+                        </div>
+                        
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="cleanse_strength" id="strengthMedium" value="medium" checked>
+                            <label class="form-check-label" for="strengthMedium">
+                                <strong>Medium</strong> - Balanced approach, removes most repetitive content
+                            </label>
+                        </div>
+                        
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="cleanse_strength" id="strengthAggressive" value="aggressive">
+                            <label class="form-check-label" for="strengthAggressive">
+                                <strong>Aggressive</strong> - Maximum reduction, significantly condenses content
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <p class="text-muted"><small>The cleansing process may take a few moments. The original file will be preserved, and a new cleansed version will be created.</small></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning">
+                        <i class="fas fa-broom me-1"></i> Cleanse
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 {% block scripts %}
 <script>
 // Add file preview functionality for supported file types
@@ -171,6 +243,16 @@ document.querySelectorAll('[data-bs-target="#translateModal"]').forEach(button =
         const fileName = this.getAttribute('data-file-name');
         document.getElementById('translateFilePath').value = filePath;
         document.getElementById('translateModalLabel').textContent = `Translate: ${fileName}`;
+    });
+});
+
+// Set up cleanse modal
+document.querySelectorAll('[data-bs-target="#cleanseModal"]').forEach(button => {
+    button.addEventListener('click', function() {
+        const filePath = this.getAttribute('data-file-path');
+        const fileName = this.getAttribute('data-file-name');
+        document.getElementById('cleanseFilePath').value = filePath;
+        document.getElementById('cleanseModalLabel').textContent = `Cleanse: ${fileName}`;
     });
 });
 </script>

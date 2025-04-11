@@ -215,7 +215,7 @@ class LazyScholar:
             
             # Initialize the model for final paper generation
             self.gemini = genai.GenerativeModel(
-                model_name="gemini-2.0-flash-thinking-exp-01-21",
+                model_name="gemini-2.5-pro-exp-03-25",
                 generation_config=generation_config
             )
             
@@ -3277,27 +3277,581 @@ This file tracks the generated topics and subtopics for your academic research p
         initial_paragraphs = len(re.findall(r'\n\n.+', paper_content))
         logger.info(f"Initial paper has {initial_headings} headings and approximately {initial_paragraphs} paragraphs")
         
-        # Try with the entire content first
-        optimized_content = self._try_optimize_chunk(paper_content)
-        if optimized_content and self._validate_optimized_content(paper_content, optimized_content):
-            logger.info("Successfully optimized entire paper as one chunk")
-            return optimized_content
+        # First try with the entire content - simpler approach is better if it works
+        try:
+            logger.info("Attempting to optimize entire paper as one chunk")
+            optimized_content = self._try_optimize_chunk(paper_content)
+            if optimized_content and self._validate_optimized_content(paper_content, optimized_content):
+                logger.info("Successfully optimized entire paper as one chunk")
+                return optimized_content
+        except Exception as e:
+            error_msg = str(e)
+            if "504" in error_msg or "deadline exceeded" in error_msg.lower() or "timeout" in error_msg.lower():
+                logger.warning(f"Timeout error while optimizing entire paper: {error_msg}")
+            else:
+                logger.error(f"Error optimizing entire paper: {error_msg}")
         
-        # If that failed, try with progressive chunking
+        # Progressive chunking approach - if the entire content fails, try with increasing numbers of chunks
+        # Start with 2 chunks, then 3, then 4, etc. until it works or we reach the maximum
         max_chunks = 10  # Maximum number of chunks to try
-        overlap = 150    # Increased overlap for better continuity
+        overlap = 150    # Overlap between chunks for better continuity
         
         for num_chunks in range(2, max_chunks + 1):
             logger.info(f"Trying to optimize with {num_chunks} chunks")
-            result = self._optimize_with_n_chunks(paper_content, num_chunks, overlap)
-            if result and self._validate_optimized_content(paper_content, result):
-                logger.info(f"Successfully optimized paper with {num_chunks} chunks")
-                return result
+            try:
+                result = self._optimize_with_n_chunks(paper_content, num_chunks, overlap)
+                if result and self._validate_optimized_content(paper_content, result):
+                    logger.info(f"Successfully optimized paper with {num_chunks} chunks")
+                    return result
+            except Exception as e:
+                error_msg = str(e)
+                if "504" in error_msg or "deadline exceeded" in error_msg.lower() or "timeout" in error_msg.lower():
+                    logger.warning(f"Timeout error while optimizing with {num_chunks} chunks: {error_msg}")
+                else:
+                    logger.error(f"Error optimizing with {num_chunks} chunks: {error_msg}")
+                # Continue with more chunks if we hit a timeout
+                continue
         
         # If all chunking attempts failed, return the original content
         logger.warning("All chunking attempts failed, returning original content")
         return backup_content
-    
+        
+    def _try_optimize_chunk(self, chunk_content: str) -> Optional[str]:
+        """
+        Attempt to optimize a single chunk of content.
+        
+        Args:
+            chunk_content: Content chunk to optimize
+            
+        Returns:
+            Optimized content or None if failed
+        """
+        try:
+            prompt = f"""
+            You are an expert academic editor. Your task is to optimize and improve the following research paper:
+
+            1. Fix any grammatical errors and improve sentence structure
+            2. Enhance coherence and flow between sections
+            3. Standardize formatting and ensure consistent style
+            4. IMPORTANT: Remove and merge repetitive information
+            5. Ensure consistent terminology and voice throughout
+            6. Maintain all academic references and citations exactly as they are
+            7. Preserve the original structure, headings, and section organization
+            8. Ensure the content is in {self.language} language
+            9. Make sure your response is COMPLETE and includes ALL the content from the original paper
+
+            IMPORTANT: Your response should contain ONLY the revised paper text. Do not include any meta-commentary,
+            explanations of changes, or notes. Your output will be directly saved as the final paper.
+            Make absolutely sure that you don't truncate or cut off the paper - include the ENTIRE content including all sections.
+
+            Here is the research paper content:
+            
+            {chunk_content}
+            """
+            
+            # Call the LLM with extended retry for timeout errors
+            result = self._api_call_with_retry(
+                lambda: self.gemini.generate_content(prompt).text,
+                max_retries=3,  # Reduce max retries per chunk, since we'll try with more chunks anyway
+                retry_delay=5
+            )
+            
+            if result:
+                logger.info("Successfully optimized content chunk")
+                return result
+            else:
+                logger.warning("Failed to optimize content chunk, result was empty")
+                return None
+                
+        except Exception as e:
+            error_msg = str(e)
+            if "504" in error_msg or "deadline exceeded" in error_msg.lower() or "timeout" in error_msg.lower():
+                logger.warning(f"Timeout error while optimizing chunk: {error_msg}")
+                # Re-raise timeout exceptions to trigger chunking
+                raise e
+            else:
+                logger.error(f"Error optimizing chunk: {error_msg}")
+                return None
+
+    def _optimize_with_n_chunks(self, paper_content: str, num_chunks: int, overlap: int) -> Optional[str]:
+        """
+        Split content into n chunks with overlap and optimize each.
+        
+        Args:
+            paper_content: Full paper content
+            num_chunks: Number of chunks to split into
+            overlap: Number of characters overlap between chunks
+            
+        Returns:
+            Optimized combined content or None if failed
+        """
+        # Calculate chunk size
+        total_length = len(paper_content)
+        base_chunk_size = total_length // num_chunks
+        
+        chunks = []
+        optimized_chunks = []
+        
+        # Create overlapping chunks with more intelligent boundaries
+        for i in range(num_chunks):
+            # Calculate basic start and end positions
+            start = max(0, i * base_chunk_size - (overlap if i > 0 else 0))
+            end = min(total_length, (i + 1) * base_chunk_size + (overlap if i < num_chunks - 1 else 0))
+            
+            # Adjust start to paragraph or sentence boundary if possible
+            if i > 0 and start > 0:
+                # Look for paragraph breaks
+                paragraph_start = paper_content.rfind('\n\n', max(0, start - 200), start + 200)
+                if paragraph_start != -1 and paragraph_start < start + 200:
+                    start = paragraph_start + 2  # +2 to start after the \n\n
+                else:
+                    # Look for sentence breaks
+                    for punct in ['. ', '! ', '? ']:
+                        sentence_start = paper_content.rfind(punct, max(0, start - 150), start + 150)
+                        if sentence_start != -1 and sentence_start < start + 150:
+                            start = sentence_start + 2  # +2 to start after the punctuation and space
+                            break
+            
+            # Adjust end to paragraph or sentence boundary if possible
+            if i < num_chunks - 1 and end < total_length:
+                # Look for paragraph breaks
+                paragraph_end = paper_content.find('\n\n', max(0, end - 200), min(total_length, end + 200))
+                if paragraph_end != -1 and paragraph_end > end - 200:
+                    end = paragraph_end
+                else:
+                    # Look for sentence breaks
+                    for punct in ['. ', '! ', '? ']:
+                        sentence_end = paper_content.find(punct, max(0, end - 150), min(total_length, end + 150))
+                        if sentence_end != -1 and sentence_end > end - 150:
+                            end = sentence_end + 2  # +2 to include the punctuation and space
+                            break
+            
+            chunk = paper_content[start:end]
+            chunks.append({"start": start, "end": end, "content": chunk})
+            logger.info(f"Chunk {i+1}: {len(chunk)} chars ({start}-{end})")
+        
+        # Optimize each chunk
+        for i, chunk_data in enumerate(chunks):
+            chunk = chunk_data["content"]
+            logger.info(f"Optimizing chunk {i+1}/{num_chunks} ({len(chunk)} chars)")
+            try:
+                optimized = self._try_optimize_chunk(chunk)
+                if optimized:
+                    optimized_chunks.append({"index": i, "content": optimized, "start": chunk_data["start"], "end": chunk_data["end"]})
+                else:
+                    logger.warning(f"Failed to optimize chunk {i+1}, using original")
+                    optimized_chunks.append({"index": i, "content": chunk, "start": chunk_data["start"], "end": chunk_data["end"]})
+            except Exception as e:
+                if "504" in str(e) or "deadline exceeded" in str(e).lower() or "timeout" in str(e).lower():
+                    # If we get a timeout on a chunk, it's too large. Try a smaller chunk next time.
+                    logger.warning(f"Timeout on chunk {i+1}, using original content")
+                    optimized_chunks.append({"index": i, "content": chunk, "start": chunk_data["start"], "end": chunk_data["end"]})
+                else:
+                    raise e
+        
+        # Validate that we have all chunks
+        if len(optimized_chunks) != num_chunks:
+            logger.warning(f"Not all chunks were processed ({len(optimized_chunks)}/{num_chunks})")
+            return None
+        
+        # Sort chunks by index to ensure correct order
+        optimized_chunks.sort(key=lambda x: x["index"])
+        
+        # Combine optimized chunks, handling overlap intelligently
+        final_result = []
+        for i, chunk_data in enumerate(optimized_chunks):
+            chunk = chunk_data["content"]
+            
+            if i == 0:
+                # For first chunk, use the whole thing
+                final_result.append(chunk)
+            else:
+                prev_chunk = final_result[-1]
+                
+                # Find a good joining point between chunks
+                if len(prev_chunk) > overlap and len(chunk) > overlap:
+                    # Use the last part of previous chunk and first part of current chunk to find overlap
+                    prev_end = prev_chunk[-overlap*2:]  # Use twice the overlap to find better matching
+                    curr_start = chunk[:overlap*2]
+                    
+                    # Find best join point in the overlap
+                    join_point = self._find_best_join_point(prev_end, curr_start)
+                    
+                    # Adjust join_point to be relative to the original chunks
+                    relative_join = max(0, len(prev_chunk) - 2*overlap + join_point)
+                    
+                    # Join at the best point
+                    final_result[-1] = prev_chunk[:relative_join]
+                    final_result.append(chunk)
+                else:
+                    # If chunks are too small for proper overlap handling, just append
+                    final_result.append(chunk)
+        
+        combined = "".join(final_result)
+        
+        # Final validation to ensure we have a complete document
+        if self._validate_optimized_content(paper_content, combined):
+            logger.info(f"Successfully combined {num_chunks} optimized chunks ({len(combined)} chars)")
+            return combined
+        else:
+            logger.warning("Combined content failed validation, may be incomplete")
+            return None
+
+    def _find_best_join_point(self, text1: str, text2: str) -> int:
+        """Find the best point to join two overlapping text segments."""
+        # Look for sentence boundaries (., !, ?)
+        sentence_breaks = [i for i, char in enumerate(text1) if char in ('.', '!', '?')]
+        
+        if sentence_breaks:
+            # Use the last sentence break
+            return sentence_breaks[-1] + 1
+        
+        # If no sentence breaks, look for paragraph breaks
+        paragraph_breaks = [i for i, char in enumerate(text1) if char == '\n']
+        
+        if paragraph_breaks:
+            # Use the last paragraph break
+            return paragraph_breaks[-1] + 1
+        
+        # If no good break points, use the middle
+        return len(text1) // 2
+        
+    def cleanse_document(self, file_path: str, cleanse_strength: str = "medium") -> Optional[str]:
+        """
+        Cleanse a document by removing repetitive content using LLM.
+        Uses a progressive chunking approach similar to paper optimization.
+        
+        Args:
+            file_path: Path to the document to cleanse
+            cleanse_strength: Strength of the cleansing process (light, medium, aggressive)
+            
+        Returns:
+            Path to the cleansed document or None if failed
+        """
+        logger.info(f"Cleansing document: {file_path} with {cleanse_strength} strength")
+        
+        # Validate cleanse_strength parameter
+        if cleanse_strength not in ["light", "medium", "aggressive"]:
+            logger.warning(f"Invalid cleanse_strength '{cleanse_strength}', defaulting to 'medium'")
+            cleanse_strength = "medium"
+        
+        try:
+            # Ensure the file exists
+            if not os.path.exists(file_path):
+                logger.error(f"File not found: {file_path}")
+                return None
+                
+            # Read the file content
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                
+            # Create a backup of the original document
+            backup_path = f"{file_path}.bak"
+            shutil.copy2(file_path, backup_path)
+            logger.info(f"Created backup at: {backup_path}")
+            
+            # Prepare prompt for LLM based on cleanse strength
+            cleanse_instructions = self._get_cleanse_instructions(cleanse_strength)
+            
+            prompt = f"""
+            You are an expert academic editor. Your task is to review and cleanse the following document:
+
+            {cleanse_instructions}
+
+            IMPORTANT: Focus specifically on removing repetitive content that essentially says the same thing in different words.
+            This is the primary goal of this cleansing process.
+
+            Your response should ONLY contain the cleansed document without any additional explanations.
+            Don't add any notes or comments about what you changed.
+
+            Here is the document content:
+            
+            {content}
+            """
+            
+            # First try to cleanse the entire document
+            try:
+                logger.info("Attempting to cleanse entire document as one chunk")
+                result = self._api_call_with_retry(
+                    lambda: self.gemini.generate_content(prompt).text,
+                    max_retries=1,
+                    retry_delay=5
+                )
+                
+                if result:
+                    logger.info("Successfully cleansed document as one chunk")
+                else:
+                    # If result is empty, we'll try chunking
+                    logger.warning("Empty result when cleansing entire document, will try chunking")
+                    result = None
+            except Exception as e:
+                error_msg = str(e)
+                if "504" in error_msg or "deadline exceeded" in error_msg.lower() or "timeout" in error_msg.lower():
+                    # If we got a timeout, we'll fall through to the progressive chunking approach
+                    logger.warning(f"Timeout error while cleansing entire document: {error_msg}, will try chunking")
+                else:
+                    logger.warning(f"Error during full document cleansing: {error_msg}")
+                result = None
+                
+            # If cleansing the entire document failed, try progressive chunking
+            if not result:
+                logger.info("Trying progressive chunking approach for document cleansing")
+                
+                # Start with 2 chunks and increase until successful or max reached
+                max_chunks = 5  # Maximum number of chunks to try
+                overlap = 100   # Overlap between chunks
+                
+                for num_chunks in range(2, max_chunks + 1):
+                    logger.info(f"Trying to cleanse with {num_chunks} chunks")
+                    try:
+                        result = self._cleanse_with_chunks(content, num_chunks, overlap, cleanse_strength)
+                        if result:
+                            logger.info(f"Successfully cleansed document with {num_chunks} chunks")
+                            break
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "504" in error_msg or "deadline exceeded" in error_msg.lower() or "timeout" in error_msg.lower():
+                            logger.warning(f"Timeout error while cleansing with {num_chunks} chunks: {error_msg}")
+                        else:
+                            logger.error(f"Error cleansing with {num_chunks} chunks: {error_msg}")
+                        # Continue with more chunks if we hit a timeout
+                        continue
+            
+            # Check if cleansing was successful
+            if not result:
+                logger.error("Failed to cleanse document after all attempts")
+                return None
+                
+            # Log the difference in content length
+            original_length = len(content)
+            cleansed_length = len(result)
+            reduction_percentage = ((original_length - cleansed_length) / original_length) * 100
+            logger.info(f"Original content length: {original_length} chars")
+            logger.info(f"Cleansed content length: {cleansed_length} chars")
+            logger.info(f"Content reduced by {reduction_percentage:.2f}%")
+                
+            # Generate a filename for the cleansed document
+            # Extract path components
+            file_dir = os.path.dirname(file_path)
+            file_name = os.path.basename(file_path)
+            file_root, file_ext = os.path.splitext(file_name)
+            
+            # Create a new filename with '_cleansed' suffix
+            cleansed_name = f"{file_root}_cleansed{file_ext}"
+            cleansed_path = os.path.join(file_dir, cleansed_name)
+            
+            # Save the cleansed content to the new file
+            with open(cleansed_path, "w", encoding="utf-8") as f:
+                f.write(result)
+                
+            logger.info(f"Document successfully cleansed: {cleansed_path}")
+            return cleansed_path
+            
+        except Exception as e:
+            logger.error(f"Error cleansing document: {str(e)}")
+            return None
+            
+    def _get_cleanse_instructions(self, cleanse_strength: str) -> str:
+        """
+        Get cleanse instructions based on the requested strength.
+        
+        Args:
+            cleanse_strength: Strength of cleansing (light, medium, aggressive)
+            
+        Returns:
+            Formatted cleanse instructions
+        """
+        if cleanse_strength == "light":
+            return """
+            1. Remove obviously repetitive content that appears multiple times in nearly identical form
+            2. Merge clearly redundant sections that cover exactly the same information
+            3. Make minor adjustments to improve clarity and conciseness
+            4. Ensure consistency in formatting, terminology, and style
+            5. Maintain all original headings, structure, and academic references
+            6. Ensure the content flows logically
+            7. Ensure the content remains in the same language
+            8. Be conservative in your edits - when in doubt, retain the original text
+            """
+        elif cleanse_strength == "aggressive":
+            return """
+            1. MOST IMPORTANT: Aggressively remove ALL repetitive or redundant content, even if phrased differently
+            2. Merge any sections that cover similar topics or information
+            3. Significantly reduce verbosity and make the text as concise as possible
+            4. Rewrite sections to be much more direct and compact
+            5. Maintain core headings and academic references, but simplify where possible
+            6. Restructure content for maximum efficiency and clarity
+            7. Ensure the content remains in the same language
+            8. Focus on substantial reduction while preserving essential meaning
+            """
+        else:  # medium (default)
+            return """
+            1. MOST IMPORTANT: Remove ALL repetitive or redundant content - look for passages that say the same thing in different words
+            2. Merge similar sections that cover the same information
+            3. Remove unnecessary verbosity and make the text more concise
+            4. Ensure consistency in formatting, terminology, and style
+            5. Maintain all original headings, structure, and academic references
+            6. Ensure the content flows logically and has smooth transitions
+            7. Ensure the content remains in the same language
+            8. Keep all essential information intact while eliminating redundancies
+            """
+            
+    def _get_min_content_ratio(self, cleanse_strength: str) -> float:
+        """
+        Get minimum content ratio based on cleanse strength.
+        
+        Args:
+            cleanse_strength: Strength of cleansing (light, medium, aggressive)
+            
+        Returns:
+            Minimum ratio of cleansed content length to original content length
+        """
+        if cleanse_strength == "light":
+            return 0.7  # Light cleansing should remove at most 30%
+        elif cleanse_strength == "medium":
+            return 0.5  # Medium cleansing can remove up to 50%
+        elif cleanse_strength == "aggressive":
+            return 0.3  # Aggressive cleansing can remove up to 70%
+        else:
+            return 0.5  # Default to medium
+            
+    def _cleanse_with_chunks(self, content: str, num_chunks: int, overlap: int, cleanse_strength: str = "medium") -> Optional[str]:
+        """
+        Cleanse document by splitting into chunks and cleansing each chunk.
+        
+        Args:
+            content: Document content
+            num_chunks: Number of chunks to split into
+            overlap: Number of characters overlap between chunks
+            cleanse_strength: Strength of cleansing (light, medium, aggressive)
+            
+        Returns:
+            Cleansed combined content or None if failed
+        """
+        # Calculate chunk size
+        total_length = len(content)
+        base_chunk_size = total_length // num_chunks
+        
+        chunks = []
+        cleansed_chunks = []
+        
+        # Create overlapping chunks
+        for i in range(num_chunks):
+            # Calculate basic start and end positions
+            start = max(0, i * base_chunk_size - (overlap if i > 0 else 0))
+            end = min(total_length, (i + 1) * base_chunk_size + (overlap if i < num_chunks - 1 else 0))
+            
+            # Adjust start to paragraph boundary if possible
+            if i > 0 and start > 0:
+                paragraph_start = content.rfind('\n\n', max(0, start - 200), start + 100)
+                if paragraph_start != -1 and paragraph_start < start + 100:
+                    start = paragraph_start + 2  # +2 to start after the \n\n
+            
+            # Adjust end to paragraph boundary if possible
+            if i < num_chunks - 1 and end < total_length:
+                paragraph_end = content.find('\n\n', max(0, end - 100), min(total_length, end + 200))
+                if paragraph_end != -1 and paragraph_end > end - 100:
+                    end = paragraph_end
+            
+            chunk = content[start:end]
+            chunks.append({"start": start, "end": end, "content": chunk})
+            logger.info(f"Chunk {i+1}: {len(chunk)} chars ({start}-{end})")
+        
+        # Cleanse each chunk
+        for i, chunk_data in enumerate(chunks):
+            chunk = chunk_data["content"]
+            logger.info(f"Cleansing chunk {i+1}/{num_chunks} ({len(chunk)} chars)")
+            
+            # Get cleanse instructions based on strength
+            cleanse_instructions = self._get_cleanse_instructions(cleanse_strength)
+            
+            prompt = f"""
+            You are an expert academic editor. Your task is to review and cleanse the following document segment:
+
+            {cleanse_instructions}
+
+            IMPORTANT: Focus specifically on removing repetitive content that essentially says the same thing in different words.
+            This is the primary goal of this cleansing process.
+
+            Your response should ONLY contain the cleansed document segment without any additional explanations.
+            Don't add any notes or comments about what you changed.
+
+            Here is the document segment:
+            
+            {chunk}
+            """
+            
+            try:
+                # Call the LLM
+                result = self._api_call_with_retry(
+                    lambda: self.gemini.generate_content(prompt).text,
+                    max_retries=2,
+                    retry_delay=5
+                )
+                
+                if result:
+                    cleansed_chunks.append({"index": i, "content": result, "start": chunk_data["start"], "end": chunk_data["end"]})
+                else:
+                    # If cleansing failed, use the original chunk
+                    logger.warning(f"Failed to cleanse chunk {i+1}, using original")
+                    cleansed_chunks.append({"index": i, "content": chunk, "start": chunk_data["start"], "end": chunk_data["end"]})
+            except Exception as e:
+                if "504" in str(e) or "deadline exceeded" in str(e).lower() or "timeout" in str(e).lower():
+                    # If we get a timeout, use the original chunk
+                    logger.warning(f"Timeout on chunk {i+1}, using original content")
+                    cleansed_chunks.append({"index": i, "content": chunk, "start": chunk_data["start"], "end": chunk_data["end"]})
+                else:
+                    raise e
+        
+        # Validate that we have all chunks
+        if len(cleansed_chunks) != num_chunks:
+            logger.warning(f"Not all chunks were processed ({len(cleansed_chunks)}/{num_chunks})")
+            return None
+        
+        # Sort chunks by index to ensure correct order
+        cleansed_chunks.sort(key=lambda x: x["index"])
+        
+        # Combine cleansed chunks
+        final_result = []
+        for i, chunk_data in enumerate(cleansed_chunks):
+            chunk = chunk_data["content"]
+            
+            if i == 0:
+                # For first chunk, use the whole thing
+                final_result.append(chunk)
+            else:
+                prev_chunk = final_result[-1]
+                
+                # Find a good joining point if chunks are large enough
+                if len(prev_chunk) > overlap and len(chunk) > overlap:
+                    # Use the last part of previous chunk and first part of current chunk to find overlap
+                    prev_end = prev_chunk[-overlap*2:] if len(prev_chunk) >= overlap*2 else prev_chunk
+                    curr_start = chunk[:overlap*2] if len(chunk) >= overlap*2 else chunk
+                    
+                    # Find the best joining point
+                    join_point = self._find_best_join_point(prev_end, curr_start)
+                    
+                    # Adjust join_point to be relative to the original chunks
+                    relative_join = max(0, len(prev_chunk) - len(prev_end) + join_point)
+                    
+                    # Join at the best point
+                    final_result[-1] = prev_chunk[:relative_join]
+                    final_result.append(chunk)
+                else:
+                    # If chunks are too small for proper overlap handling, just append
+                    final_result.append(chunk)
+        
+        combined = "".join(final_result)
+        
+        # Log content reduction statistics
+        original_length = len(content)
+        combined_length = len(combined)
+        reduction_percentage = ((original_length - combined_length) / original_length) * 100
+        logger.info(f"Original content length: {original_length} chars")
+        logger.info(f"Combined content length: {combined_length} chars")
+        logger.info(f"Content reduced by {reduction_percentage:.2f}%")
+        
+        return combined
+
     def _validate_optimized_content(self, original_content: str, optimized_content: str) -> bool:
         """
         Validate that the optimized content is complete and contains all necessary sections.
@@ -3336,139 +3890,6 @@ This file tracks the generated topics and subtopics for your academic research p
             
         logger.info("Optimized content validation passed")
         return True
-
-    def _try_optimize_chunk(self, chunk_content: str) -> Optional[str]:
-        """Attempt to optimize a single chunk of content."""
-        try:
-            prompt = f"""
-            You are an expert academic editor. Your task is to optimize and improve the following research paper:
-
-            1. Fix any grammatical errors and improve sentence structure
-            2. Enhance coherence and flow between sections
-            3. Standardize formatting and ensure consistent style
-            4. Remove redundancies and repetitive information
-            5. Ensure consistent terminology and voice throughout
-            6. Maintain all academic references and citations exactly as they are
-            7. Preserve the original structure, headings, and section organization
-            8. Ensure the content is in {self.language} language
-            9. Make sure your response is COMPLETE and includes ALL the content from the original paper
-
-            IMPORTANT: Your response should contain ONLY the revised paper text. Do not include any meta-commentary,
-            explanations of changes, or notes. Your output will be directly saved as the final paper.
-            Make absolutely sure that you don't truncate or cut off the paper - include the ENTIRE content including all sections.
-
-            Here is the research paper content:
-            
-            {chunk_content}
-            """
-            
-            # Call the LLM with extended retry for timeout errors
-            result = self._api_call_with_retry(
-                lambda: self.gemini.generate_content(prompt).text,
-                max_retries=5,
-                retry_delay=5
-            )
-            
-            if result:
-                logger.info("Successfully optimized content chunk")
-                return result
-            else:
-                logger.warning("Failed to optimize content chunk, result was empty")
-                return None
-                
-        except Exception as e:
-            error_msg = str(e)
-            if "504" in error_msg or "deadline exceeded" in error_msg.lower() or "timeout" in error_msg.lower():
-                logger.warning(f"Timeout error while optimizing chunk: {error_msg}")
-                return None
-            else:
-                logger.error(f"Error optimizing chunk: {error_msg}")
-                return None
-
-    def _optimize_with_n_chunks(self, paper_content: str, num_chunks: int, overlap: int) -> Optional[str]:
-        """Split content into n chunks with overlap and optimize each."""
-        # Calculate chunk size
-        total_length = len(paper_content)
-        chunk_size = total_length // num_chunks + overlap
-        
-        chunks = []
-        optimized_chunks = []
-        chunk_boundaries = []
-        
-        # Create overlapping chunks
-        for i in range(num_chunks):
-            start = max(0, i * chunk_size - overlap if i > 0 else 0)
-            end = min(total_length, (i + 1) * chunk_size)
-            chunk = paper_content[start:end]
-            chunks.append(chunk)
-            chunk_boundaries.append((start, end))
-            logger.info(f"Chunk {i+1}: {len(chunk)} chars ({start}-{end})")
-        
-        # Optimize each chunk
-        for i, chunk in enumerate(chunks):
-            logger.info(f"Optimizing chunk {i+1}/{num_chunks} ({len(chunk)} chars)")
-            optimized = self._try_optimize_chunk(chunk)
-            if optimized:
-                optimized_chunks.append(optimized)
-            else:
-                logger.warning(f"Failed to optimize chunk {i+1}, using original")
-                optimized_chunks.append(chunk)
-        
-        # If any chunk failed to optimize, the whole process failed
-        if len(optimized_chunks) != num_chunks:
-            logger.warning(f"Not all chunks were optimized ({len(optimized_chunks)}/{num_chunks})")
-            return None
-        
-        # Combine optimized chunks, removing overlap
-        if num_chunks == 1:
-            return optimized_chunks[0]
-        
-        final_result = []
-        for i, chunk in enumerate(optimized_chunks):
-            if i == 0:
-                # For first chunk, use the whole thing
-                final_result.append(chunk)
-            else:
-                # For subsequent chunks, try to find a good joining point in the overlap region
-                prev_end = final_result[-1][-overlap:] if len(final_result[-1]) > overlap else final_result[-1]
-                curr_start = chunk[:overlap] if len(chunk) > overlap else chunk
-                
-                # Find a sentence break in the overlap if possible
-                # This helps create better transitions between chunks
-                join_point = self._find_best_join_point(prev_end, curr_start)
-                
-                # Add the non-overlapping part plus the overlap after the join point
-                final_result[-1] = final_result[-1][:-overlap] + prev_end[:join_point]
-                final_result.append(chunk[join_point:])
-        
-        combined = "".join(final_result)
-        
-        # Final validation to ensure we have a complete document
-        if self._validate_optimized_content(paper_content, combined):
-            logger.info(f"Successfully combined {num_chunks} optimized chunks ({len(combined)} chars)")
-            return combined
-        else:
-            logger.warning("Combined content failed validation, may be incomplete")
-            return None
-
-    def _find_best_join_point(self, text1: str, text2: str) -> int:
-        """Find the best point to join two overlapping text segments."""
-        # Look for sentence boundaries (., !, ?)
-        sentence_breaks = [i for i, char in enumerate(text1) if char in ('.', '!', '?')]
-        
-        if sentence_breaks:
-            # Use the last sentence break
-            return sentence_breaks[-1] + 1
-        
-        # If no sentence breaks, look for paragraph breaks
-        paragraph_breaks = [i for i, char in enumerate(text1) if char == '\n']
-        
-        if paragraph_breaks:
-            # Use the last paragraph break
-            return paragraph_breaks[-1] + 1
-        
-        # If no good break points, use the middle
-        return len(text1) // 2
 
 def parse_arguments():
     """Parse command line arguments."""
